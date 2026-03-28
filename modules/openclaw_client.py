@@ -60,42 +60,48 @@ class OpenClawClient:
     def _try_cli_spawn(self, task: str, model: str = None, timeout_seconds: int = None) -> Optional[Dict[str, Any]]:
         """尝试使用 openclaw CLI 执行任务"""
         try:
-            # 写入临时文件
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(task)
-                task_file = f.name
+            # 构建 openclaw agent --local 命令
+            # 使用 --local 在本地运行嵌入式 agent，不需要 Gateway
+            cmd = ['openclaw', 'agent', '--local', '-m', task]
+            if model:
+                cmd.extend(['--agent', model])
             
-            try:
-                # 构建 openclaw exec 命令
-                # 注意：实际 CLI 可能不同，需要根据 openclaw 的实际命令调整
-                cmd = ['openclaw', 'exec', '--file', task_file]
-                if model:
-                    cmd.extend(['--model', model])
-                if timeout_seconds:
-                    cmd.extend(['--timeout', str(timeout_seconds)])
+            timeout_val = timeout_seconds or self.timeout
+            cmd.extend(['--timeout', str(timeout_val)])
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_val + 10  # 给 CLI 一些额外时间
+            )
+            
+            if result.returncode == 0:
+                return {
+                    'success': True,
+                    'output': result.stdout.strip(),
+                    'result': result.stdout.strip()
+                }
+            else:
+                # CLI 执行失败
+                return {
+                    'success': False,
+                    'error': result.stderr.strip() or f'CLI返回非零: {result.returncode}',
+                    'output': ''
+                }
                 
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_seconds or self.timeout
-                )
-                
-                if result.returncode == 0:
-                    return {
-                        'success': True,
-                        'output': result.stdout.strip(),
-                        'result': result.stdout.strip()
-                    }
-                else:
-                    # CLI 执行失败，返回 None 让 HTTP 方式尝试
-                    return None
-                    
-            finally:
-                os.unlink(task_file)
-                
-        except Exception:
-            return None
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'error': 'OpenClaw agent 执行超时',
+                'output': ''
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'output': ''
+            }
     
     def _try_http_spawn(self, task: str, model: str = None, timeout_seconds: int = None) -> Dict[str, Any]:
         """尝试使用 HTTP API 执行任务"""

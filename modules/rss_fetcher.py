@@ -83,3 +83,25 @@ class RSSFetcher:
         sources = config.get('rss', {}).get('sources', [])
         config['rss']['sources'] = [s for s in sources if s['url'] != url]
         return config
+
+
+if __name__ == '__main__':
+    import argparse
+    import json
+    import yaml
+    
+    parser = argparse.ArgumentParser(description='RSS订阅抓取')
+    parser.add_argument('--source', type=str, required=True, help='RSS源URL')
+    parser.add_argument('--name', type=str, default='', help='RSS源名称')
+    parser.add_argument('--max', type=int, default=10, help='最大文章数')
+    args = parser.parse_args()
+    
+    fetcher = RSSFetcher({})
+    items = fetcher.fetch_feed(args.source, args.name)
+    
+    # 限制数量
+    if args.max and len(items) > args.max:
+        items = items[:args.max]
+    
+    # 输出JSON
+    print(json.dumps(items, ensure_ascii=False))

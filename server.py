@@ -40,6 +40,8 @@ class PipelineState:
         self.processes = {}  # stage -> subprocess.Popen
         self.checkpoint = None  # 用于继续任务的检查点
         self.error = None
+        self.selected_sources = []  # 用户选择的RSS源
+        self.custom_topics = []  # 用户输入的自定义主题
     
     def to_dict(self):
         return {
@@ -55,7 +57,9 @@ class PipelineState:
             'logs': self.logs[-50:],  # 最近50条日志
             'articles': self.articles,
             'checkpoint': self.checkpoint,
-            'error': str(self.error) if self.error else None
+            'error': str(self.error) if self.error else None,
+            'selected_sources': self.selected_sources,
+            'custom_topics': self.custom_topics
         }
 
 state = PipelineState()
@@ -210,6 +214,26 @@ def run_module(module_name, *args):
 
 # ============ 流水线阶段 ============
 
+# 前端checkbox值 -> config.yaml中的源名称/URL映射
+SOURCE_ALIAS_MAP = {
+    'techcrunch': ['TechCrunch', 'techcrunch.com'],
+    'hackernews': ['Hacker News', 'hnrss.org'],
+    'openai': ['OpenAI', 'openai.com'],
+    'baoyu': ['宝玉', 'baoyu'],
+    'ruanyifeng': ['阮一峰', 'ruanyifeng'],
+}
+
+def normalize_source_selection(selected):
+    """将前端选择值转换为config中的名称/URL"""
+    normalized = []
+    for s in selected:
+        # 先检查映射表
+        if s.lower() in SOURCE_ALIAS_MAP:
+            normalized.extend(SOURCE_ALIAS_MAP[s.lower()])
+        # 再添加原值（可能已经是名称或URL）
+        normalized.append(s)
+    return normalized
+
 def stage_fetch_rss(max_items=10, checkpoint=None):
     """RSS 抓取阶段"""
     emit_event('stage', {'name': 'fetch', 'label': '📡 抓取RSS', 'progress': 0})
@@ -218,9 +242,22 @@ def stage_fetch_rss(max_items=10, checkpoint=None):
         state.current_stage = 'fetch'
         state.stage_progress = 0
         state.stage_total = 4  # RSS 源数量
+        selected = state.selected_sources
+        topics = state.custom_topics
     
     config = load_config()
     rss_sources = config.get('rss', {}).get('sources', [])
+    
+    # 根据用户选择过滤RSS源
+    if selected:
+        # 将前端值映射到实际源名称/URL
+        normalized = normalize_source_selection(selected)
+        rss_sources = [s for s in rss_sources 
+                       if s.get('name') in normalized 
+                       or s.get('url') in normalized
+                       or any(alias in s.get('name', '').lower() or alias in s.get('url', '').lower() 
+                              for alias in normalized)]
+        emit_event('log', {'msg': f'🎯 已筛选 {len(rss_sources)} 个RSS源', 'stage': 'fetch'})
     
     if checkpoint:
         # 从检查点恢复
@@ -245,6 +282,20 @@ def stage_fetch_rss(max_items=10, checkpoint=None):
             emit_event('item', {'stage': 'fetch', 'count': len(articles)})
         except Exception as e:
             emit_event('log', {'msg': f'⚠️ 抓取失败: {e}', 'stage': 'fetch', 'level': 'warn'})
+    
+    # 处理自定义主题
+    with state.lock:
+        topics = state.custom_topics
+    if topics:
+        emit_event('log', {'msg': f'💡 添加 {len(topics)} 个自定义主题', 'stage': 'fetch'})
+        for topic in topics:
+            all_articles.append({
+                'title': topic,
+                'link': f'custom://{topic}',
+                'summary': f'用户自定义主题: {topic}',
+                'source': 'custom',
+                'published': datetime.now().isoformat()
+            })
     
     # 保存到文件
     output_dir = Path(__file__).parent / 'output' / 'raw'
@@ -487,6 +538,13 @@ def api_stream():
     """SSE 流式事件端点"""
     return sse_stream()
 
+@app.route('/api/rss-sources')
+def api_rss_sources():
+    """获取RSS源列表"""
+    config = load_config()
+    sources = config.get('rss', {}).get('sources', [])
+    return jsonify({'sources': sources})
+
 @app.route('/api/pipeline', methods=['POST'])
 def api_pipeline():
     """启动完整流水线"""
@@ -496,12 +554,24 @@ def api_pipeline():
         state.reset()
         state.running = True
     
+    # 接收前端传来的 sources 和 topics
+    data = request.get_json() or {}
+    sources = data.get('sources', [])
+    topics = data.get('topics', [])
+    
+    # 保存到 state 供流水线使用
+    with state.lock:
+        state.selected_sources = sources
+        state.custom_topics = topics
+    
+    emit_event('log', {'msg': f'📋 已选择 {len(sources)} 个RSS源, {len(topics)} 个自定义主题', 'stage': 'init'})
+    
     # 在后台线程运行
     thread = threading.Thread(target=run_pipeline_full)
     thread.daemon = True
     thread.start()
     
-    return jsonify({'status': 'started'})
+    return jsonify({'status': 'started', 'sources': len(sources), 'topics': len(topics)})
 
 @app.route('/api/resume', methods=['POST'])
 def api_resume():
@@ -671,5 +741,229 @@ def api_articles():
             })
     return jsonify({'articles': articles})
 
+
+@app.route('/api/articles/<path:filename>', methods=['DELETE'])
+def api_delete_article(filename):
+    """删除文章"""
+    try:
+        article_path = Path(__file__).parent / 'output' / 'articles' / filename
+        if not article_path.exists():
+            # 可能是完整路径
+            article_path = Path(filename)
+        
+        if article_path.exists() and article_path.is_file():
+            article_path.unlink()
+            return jsonify({'status': 'deleted', 'file': str(article_path)})
+        else:
+            return jsonify({'error': '文件不存在'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/articles/<path:filename>', methods=['PUT'])
+def api_update_article(filename):
+    """更新文章内容"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': '无数据'}), 400
+        
+        article_path = Path(__file__).parent / 'output' / 'articles' / filename
+        if not article_path.exists():
+            article_path = Path(filename)
+        
+        if not article_path.exists():
+            return jsonify({'error': '文件不存在'}), 404
+        
+        content = article_path.read_text(encoding='utf-8')
+        
+        # 根据字段更新内容
+        if 'title' in data:
+            lines = content.split('\n')
+            lines[0] = f"# {data['title']}"
+            content = '\n'.join(lines)
+        
+        if 'content' in data:
+            # 替换正文内容（保留标题和元数据）
+            lines = content.split('\n')
+            title_line = lines[0] if lines else ''
+            content = title_line + '\n\n' + data['content']
+        
+        if 'raw_content' in data:
+            # 直接替换全部内容
+            content = data['raw_content']
+        
+        article_path.write_text(content, encoding='utf-8')
+        return jsonify({'status': 'updated', 'file': str(article_path)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/channels')
+def api_get_channels():
+    """获取可用的发布渠道"""
+    channels = []
+    publish_config = CONFIG.get('publish', {})
+    
+    if publish_config.get('local', {}).get('enabled'):
+        channels.append({
+            'id': 'local',
+            'name': '本地博客',
+            'type': 'local',
+            'path': publish_config['local'].get('output_dir', '')
+        })
+    
+    if publish_config.get('github', {}).get('enabled'):
+        channels.append({
+            'id': 'github',
+            'name': 'GitHub Pages',
+            'type': 'github',
+            'repo': publish_config['github'].get('repo', '')
+        })
+    
+    if publish_config.get('wordpress', {}).get('enabled'):
+        channels.append({
+            'id': 'wordpress',
+            'name': 'WordPress',
+            'type': 'wordpress',
+            'url': publish_config['wordpress'].get('url', '')
+        })
+    
+    if publish_config.get('webhook', {}).get('enabled'):
+        channels.append({
+            'id': 'webhook',
+            'name': 'Webhook',
+            'type': 'webhook'
+        })
+    
+    return jsonify({'channels': channels})
+
+
+@app.route('/api/publish/<path:filename>', methods=['POST'])
+def api_publish_article(filename):
+    """发布文章到指定渠道"""
+    try:
+        data = request.get_json() or {}
+        channels = data.get('channels', ['local'])
+        
+        article_path = Path(__file__).parent / 'output' / 'articles' / filename
+        if not article_path.exists():
+            article_path = Path(filename)
+        
+        if not article_path.exists():
+            return jsonify({'error': '文章不存在'}), 404
+        
+        content = article_path.read_text(encoding='utf-8')
+        results = []
+        
+        from modules.publisher import publish_article
+        
+        for channel in channels:
+            try:
+                result = publish_article(content, channel)
+                results.append({'channel': channel, 'status': 'success', 'result': result})
+            except Exception as e:
+                results.append({'channel': channel, 'status': 'error', 'error': str(e)})
+        
+        return jsonify({'results': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    """AI聊天接口 - 用于修改文章"""
+    try:
+        data = request.get_json()
+        message = data.get('message', '')
+        article_content = data.get('article_content', '')
+        article_filename = data.get('article_filename', '')
+        history = data.get('history', [])
+        
+        # 构建系统提示
+        system_prompt = """你是一个专业的文章编辑助手。用户会给你一篇文章，然后告诉你需要修改什么。
+你可以：
+1. 修改文章的标题、内容
+2. 调整文章结构
+3. 润色语言
+4. 添加或删除段落
+
+当用户要求修改时，请直接返回修改后的完整文章内容，用 ```markdown 包裹。
+如果用户只是问问题，正常回答即可。"""
+
+        # 构建消息
+        messages = [
+            {"role": "system", "content": system_prompt},
+        ]
+        
+        if article_content:
+            messages.append({
+                "role": "user", 
+                "content": f"这是当前文章内容：\n\n{article_content}\n\n请记住这篇文章，后续我会要求修改。"
+            })
+            messages.append({
+                "role": "assistant",
+                "content": "好的，我已经记住了这篇文章。请告诉我需要怎么修改。"
+            })
+        
+        # 添加历史消息
+        for h in history[-10:]:  # 保留最近10条
+            messages.append({"role": h.get('role', 'user'), "content": h.get('content', '')})
+        
+        # 添加当前消息
+        messages.append({"role": "user", "content": message})
+        
+        # 调用AI
+        from modules.openclaw_client import call_openclaw
+        response = call_openclaw(messages, task_type='chat')
+        
+        return jsonify({'response': response})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/articles/<path:filename>/regenerate', methods=['POST'])
+def api_regenerate_article_section(filename):
+    """重新生成文章的某个部分（摘要、扩写、配图）"""
+    try:
+        data = request.get_json()
+        section = data.get('section')  # 'summary', 'expand', 'image'
+        
+        article_path = Path(__file__).parent / 'output' / 'articles' / filename
+        if not article_path.exists():
+            article_path = Path(filename)
+        
+        if not article_path.exists():
+            return jsonify({'error': '文件不存在'}), 404
+        
+        content = article_path.read_text(encoding='utf-8')
+        
+        if section == 'image':
+            # 重新生成配图
+            from modules.image_gen import generate_image_for_article
+            image_result = generate_image_for_article(content)
+            if image_result:
+                return jsonify({'status': 'regenerated', 'section': 'image', 'url': image_result})
+            else:
+                return jsonify({'error': '配图生成失败'}), 500
+        
+        elif section == 'expand':
+            # 重新扩写
+            from modules.expander import expand_article
+            # 提取原文部分
+            expand_result = expand_article(content)
+            if expand_result:
+                return jsonify({'status': 'regenerated', 'section': 'expand'})
+            else:
+                return jsonify({'error': '扩写失败'}), 500
+        
+        else:
+            return jsonify({'error': '未知部分'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

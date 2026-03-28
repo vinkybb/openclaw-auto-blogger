@@ -1,623 +1,466 @@
-// 博客流水线前端脚本
+// ============================================
+// Blog Pipeline - Modern UI Controller
+// ============================================
 
 // 状态管理
-let config = null;
-let currentArticle = null;
+const state = {
+    sources: [],
+    selectedSources: new Set(),
+    articles: [],
+    isRunning: false,
+    currentStage: 0
+};
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    initNavigation();
-    initForms();
-    loadConfig();
-    loadStats();
-    initDatePicker();
-});
+// 阶段定义
+const STAGES = [
+    { id: 'fetch', label: '获取内容', icon: '📥' },
+    { id: 'expand', label: '话题扩展', icon: '🔄' },
+    { id: 'summarize', label: '生成摘要', icon: '✨' },
+    { id: 'image', label: '配图生成', icon: '🎨' },
+    { id: 'publish', label: '发布文章', icon: '🚀' }
+];
 
-// 导航
-function initNavigation() {
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            e.preventDefault();
-            const tab = item.dataset.tab;
-            switchTab(tab);
-        });
-    });
-}
+// API 基础路径
+const API_BASE = '';
 
-function switchTab(tabName) {
-    // 更新导航
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.tab === tabName);
-    });
-    
-    // 更新内容
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.toggle('active', content.id === `tab-${tabName}`);
-    });
-    
-    // 加载特定数据
-    if (tabName === 'logs') loadLogs();
-    if (tabName === 'rss') loadRssSources();
-    if (tabName === 'content') loadArticles();
-}
+// ============================================
+// 工具函数
+// ============================================
 
-// API调用封装
-async function api(endpoint, method = 'GET', data = null) {
-    const options = {
-        method,
-        headers: {'Content-Type': 'application/json'}
-    };
-    if (data) options.body = JSON.stringify(data);
-    
-    const response = await fetch(`/api${endpoint}`, options);
-    const result = await response.json();
-    
-    if (!response.ok) {
-        throw new Error(result.error || '请求失败');
-    }
-    
-    return result;
-}
-
-// 加载遮罩
-function showLoading(text = '处理中...') {
-    const overlay = document.getElementById('loading-overlay');
-    document.getElementById('loading-text').textContent = text;
-    overlay.style.display = 'flex';
-}
-
-function hideLoading() {
-    document.getElementById('loading-overlay').style.display = 'none';
-}
-
-// 通知
-function showToast(message, type = 'success') {
-    const container = document.getElementById('toast-container');
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `
-        <i class="ri-${type === 'success' ? 'check' : type === 'error' ? 'error-warning' : 'information'}-line"></i>
-        <span>${message}</span>
-    `;
+    
+    const icons = {
+        success: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+        error: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+        info: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+        warning: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+    };
+    
+    toast.innerHTML = `${icons[type]}<span class="toast-message">${message}</span>`;
     container.appendChild(toast);
     
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
 }
 
-// 加载配置
-async function loadConfig() {
-    try {
-        config = await api('/config');
-        populateSettings(config);
-    } catch (e) {
-        console.error('加载配置失败:', e);
+function formatTime(date) {
+    const d = new Date(date);
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function updateStatus(text, isActive = false) {
+    const statusText = document.querySelector('.status-text');
+    const statusDot = document.querySelector('.status-dot');
+    if (statusText) statusText.textContent = text;
+    if (statusDot) {
+        statusDot.style.background = isActive ? 'var(--warning)' : 'var(--success)';
     }
 }
 
-// 填充设置
-function populateSettings(config) {
-    // AI设置
-    const aiConfig = config.ai || {};
-    document.getElementById('ai-provider').value = aiConfig.provider || 'openai';
-    document.getElementById('ai-api-key').value = aiConfig.api_key || '';
-    document.getElementById('ai-base-url').value = aiConfig.base_url || 'https://api.openai.com/v1';
-    document.getElementById('ai-model').value = aiConfig.model || 'gpt-4o-mini';
-    
-    // 配图设置
-    const imageConfig = config.image || {};
-    document.getElementById('image-enabled').checked = imageConfig.enabled !== false;
-    document.getElementById('image-provider').value = imageConfig.provider || 'dalle';
-    document.getElementById('image-api-key').value = imageConfig.api_key || '';
-    
-    // 内容设置
-    const contentConfig = config.content || {};
-    document.getElementById('content-summary-length').value = contentConfig.summary_length || 200;
-    document.getElementById('content-article-length').value = contentConfig.article_length || 1500;
-    document.getElementById('content-language').value = contentConfig.language || 'zh-CN';
-    document.getElementById('content-include-source').checked = contentConfig.include_source !== false;
-    
-    // 定时任务
-    const schedulerConfig = config.scheduler || {};
-    document.getElementById('scheduler-enabled').checked = schedulerConfig.enabled || false;
-    document.getElementById('scheduler-interval').value = config.rss?.fetch_interval || 3600;
-    document.getElementById('scheduler-timezone').value = schedulerConfig.timezone || 'Asia/Shanghai';
-    
-    // 发布设置
-    const publishConfig = config.publish || {};
-    
-    const localConfig = publishConfig.local || {};
-    document.getElementById('pub-local-enabled').checked = localConfig.enabled !== false;
-    document.getElementById('pub-local-type').value = localConfig.type || 'hugo';
-    document.getElementById('pub-local-dir').value = localConfig.content_dir || './output/posts';
-    
-    const githubConfig = publishConfig.github || {};
-    document.getElementById('pub-github-enabled').checked = githubConfig.enabled || false;
-    document.getElementById('pub-github-repo').value = githubConfig.repo || '';
-    document.getElementById('pub-github-branch').value = githubConfig.branch || 'main';
-    document.getElementById('pub-github-token').value = githubConfig.token || '';
-    
-    const wpConfig = publishConfig.wordpress || {};
-    document.getElementById('pub-wordpress-enabled').checked = wpConfig.enabled || false;
-    document.getElementById('pub-wordpress-url').value = wpConfig.url || '';
-    document.getElementById('pub-wordpress-username').value = wpConfig.username || '';
-    document.getElementById('pub-wordpress-password').value = wpConfig.password || '';
-    
-    const webhookConfig = publishConfig.webhook || {};
-    document.getElementById('pub-webhook-enabled').checked = webhookConfig.enabled || false;
-    document.getElementById('pub-webhook-url').value = webhookConfig.url || '';
-    document.getElementById('pub-webhook-headers').value = JSON.stringify(webhookConfig.headers || {});
-}
+// ============================================
+// RSS 源管理
+// ============================================
 
-// 加载统计
-async function loadStats() {
-    try {
-        const status = await api('/status');
-        document.getElementById('stat-rss-sources').textContent = status.rss_sources || 0;
-        document.getElementById('stat-targets').textContent = status.publish_targets || 0;
-        
-        if (status.scheduler_running) {
-            document.getElementById('scheduler-status').innerHTML = `
-                <span class="dot active"></span>
-                <span>定时任务: 运行中</span>
-            `;
-        }
-    } catch (e) {
-        console.error('加载状态失败:', e);
-    }
+async function loadRssSources() {
+    const grid = document.getElementById('rssGrid');
+    grid.innerHTML = '<div class="skeleton-loader"><div class="skeleton-item"></div><div class="skeleton-item"></div><div class="skeleton-item"></div><div class="skeleton-item"></div></div>';
     
-    // 加载文章统计
     try {
-        const posts = await api('/posts');
-        document.getElementById('stat-articles').textContent = posts.posts?.length || 0;
-        document.getElementById('stat-published').textContent = posts.posts?.length || 0;
-    } catch (e) {
-        console.error('加载文章失败:', e);
+        const response = await fetch(`${API_BASE}/api/rss-sources`);
+        const data = await response.json();
+        
+        state.sources = data.sources || [];
+        state.selectedSources = new Set();
+        
+        renderSources();
+        updateSourceCount();
+    } catch (error) {
+        console.error('加载RSS源失败:', error);
+        grid.innerHTML = `<div class="empty-state"><p class="empty-desc">加载失败，请重试</p></div>`;
+        showToast('加载RSS源失败', 'error');
     }
 }
 
-// 表单初始化
-function initForms() {
-    // 添加RSS源
-    document.getElementById('form-add-rss').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const name = document.getElementById('rss-name').value;
-        const url = document.getElementById('rss-url').value;
-        
-        if (!name || !url) {
-            showToast('请填写完整信息', 'error');
-            return;
-        }
-        
-        try {
-            showLoading('添加RSS源...');
-            if (!config.rss) config.rss = {sources: []};
-            config.rss.sources.push({name, url, enabled: true});
-            await api('/config', 'POST', config);
-            showToast('RSS源已添加');
-            loadRssSources();
-            document.getElementById('form-add-rss').reset();
-        } catch (e) {
-            showToast(e.message, 'error');
-        } finally {
-            hideLoading();
-        }
-    });
+function renderSources() {
+    const grid = document.getElementById('rssGrid');
     
-    // 生成文章
-    document.getElementById('form-generate').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const title = document.getElementById('gen-title').value;
-        const content = document.getElementById('gen-content').value;
-        const sourceUrl = document.getElementById('gen-source').value;
-        
-        if (!title) {
-            showToast('请填写标题', 'error');
-            return;
-        }
-        
-        try {
-            showLoading('生成文章中...');
-            const result = await api('/content/generate', 'POST', {
-                title, content, source_url: sourceUrl
-            });
-            
-            currentArticle = result.article;
-            showArticleResult(result.article);
-            showToast('文章已生成');
-        } catch (e) {
-            showToast(e.message, 'error');
-        } finally {
-            hideLoading();
-        }
-    });
-    
-    // 保存设置
-    document.getElementById('btn-save-settings').addEventListener('click', saveAllSettings);
-    document.getElementById('btn-save-publish').addEventListener('click', savePublishSettings);
-    
-    // 发布结果
-    document.getElementById('btn-publish-result').addEventListener('click', publishCurrentArticle);
-    document.getElementById('btn-copy-result').addEventListener('click', copyArticleContent);
-    
-    // 快速操作
-    document.getElementById('btn-run-pipeline').addEventListener('click', runPipeline);
-    document.getElementById('btn-fetch-rss').addEventListener('click', fetchRss);
-    document.getElementById('btn-start-scheduler').addEventListener('click', toggleScheduler);
-    document.getElementById('btn-preview-rss').addEventListener('click', previewRss);
-    document.getElementById('btn-refresh-logs').addEventListener('click', loadLogs);
-    
-    // 加载RSS源列表
-    loadRssSources();
-    
-    // 加载文章列表
-    loadArticles();
-}
-
-// 保存设置
-async function saveAllSettings() {
-    try {
-        showLoading('保存设置...');
-        
-        config = config || {};
-        
-        // AI设置
-        config.ai = {
-            provider: document.getElementById('ai-provider').value,
-            api_key: document.getElementById('ai-api-key').value,
-            base_url: document.getElementById('ai-base-url').value,
-            model: document.getElementById('ai-model').value
-        };
-        
-        // 配图设置
-        config.image = {
-            enabled: document.getElementById('image-enabled').checked,
-            provider: document.getElementById('image-provider').value,
-            api_key: document.getElementById('image-api-key').value
-        };
-        
-        // 内容设置
-        config.content = {
-            summary_length: parseInt(document.getElementById('content-summary-length').value),
-            article_length: parseInt(document.getElementById('content-article-length').value),
-            language: document.getElementById('content-language').value,
-            include_source: document.getElementById('content-include-source').checked
-        };
-        
-        // 定时任务
-        config.scheduler = {
-            enabled: document.getElementById('scheduler-enabled').checked,
-            timezone: document.getElementById('scheduler-timezone').value
-        };
-        
-        config.rss = config.rss || {};
-        config.rss.fetch_interval = parseInt(document.getElementById('scheduler-interval').value);
-        
-        await api('/config', 'POST', config);
-        showToast('设置已保存');
-    } catch (e) {
-        showToast(e.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-// 保存发布设置
-async function savePublishSettings() {
-    try {
-        showLoading('保存发布设置...');
-        
-        config = config || {};
-        config.publish = {
-            local: {
-                enabled: document.getElementById('pub-local-enabled').checked,
-                type: document.getElementById('pub-local-type').value,
-                content_dir: document.getElementById('pub-local-dir').value
-            },
-            github: {
-                enabled: document.getElementById('pub-github-enabled').checked,
-                repo: document.getElementById('pub-github-repo').value,
-                branch: document.getElementById('pub-github-branch').value,
-                token: document.getElementById('pub-github-token').value
-            },
-            wordpress: {
-                enabled: document.getElementById('pub-wordpress-enabled').checked,
-                url: document.getElementById('pub-wordpress-url').value,
-                username: document.getElementById('pub-wordpress-username').value,
-                password: document.getElementById('pub-wordpress-password').value
-            },
-            webhook: {
-                enabled: document.getElementById('pub-webhook-enabled').checked,
-                url: document.getElementById('pub-webhook-url').value,
-                headers: JSON.parse(document.getElementById('pub-webhook-headers').value || '{}')
-            }
-        };
-        
-        await api('/config', 'POST', config);
-        showToast('发布设置已保存');
-        loadStats();
-    } catch (e) {
-        showToast(e.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-// 加载RSS源
-function loadRssSources() {
-    if (!config?.rss?.sources) {
-        document.getElementById('rss-list').innerHTML = '<p class="placeholder">暂无RSS源</p>';
+    if (state.sources.length === 0) {
+        grid.innerHTML = `<div class="empty-state"><p class="empty-desc">暂无RSS源</p></div>`;
         return;
     }
     
-    const sources = config.rss.sources;
-    if (sources.length === 0) {
-        document.getElementById('rss-list').innerHTML = '<p class="placeholder">暂无RSS源</p>';
-        return;
-    }
-    
-    const html = sources.map((source, index) => `
-        <div class="list-item">
-            <div class="list-item-info">
-                <div class="list-item-title">${source.name}</div>
-                <div class="list-item-meta">${source.url}</div>
+    grid.innerHTML = state.sources.map((source, index) => `
+        <div class="source-card" onclick="toggleSource(${index})" data-index="${index}">
+            <input type="checkbox" id="source-${index}" ${state.selectedSources.has(index) ? 'checked' : ''}>
+            <div class="source-checkbox">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>
             </div>
-            <div class="list-item-actions">
-                <button onclick="toggleRssSource(${index})" title="${source.enabled ? '禁用' : '启用'}">
-                    <i class="ri-${source.enabled ? 'toggle-fill' : 'toggle-line'}"></i>
+            <div class="source-info">
+                <div class="source-name">${escapeHtml(source.name || source)}</div>
+                <div class="source-meta">${source.url ? new URL(source.url).hostname : 'RSS源'}</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function toggleSource(index) {
+    const card = document.querySelector(`[data-index="${index}"]`);
+    if (state.selectedSources.has(index)) {
+        state.selectedSources.delete(index);
+        card.classList.remove('selected');
+    } else {
+        state.selectedSources.add(index);
+        card.classList.add('selected');
+    }
+    updateSourceCount();
+}
+
+function toggleAllRss(selectAll) {
+    state.sources.forEach((_, index) => {
+        const card = document.querySelector(`[data-index="${index}"]`);
+        if (selectAll) {
+            state.selectedSources.add(index);
+            card.classList.add('selected');
+        } else {
+            state.selectedSources.delete(index);
+            card.classList.remove('selected');
+        }
+    });
+    updateSourceCount();
+}
+
+function updateSourceCount() {
+    document.getElementById('sourceCount').textContent = `${state.selectedSources.size} 个源已选`;
+}
+
+// ============================================
+// 文章数量控制
+// ============================================
+
+function adjustCount(delta) {
+    const input = document.getElementById('articleCount');
+    let value = parseInt(input.value) || 3;
+    value = Math.max(1, Math.min(10, value + delta));
+    input.value = value;
+}
+
+// ============================================
+// 流水线控制
+// ============================================
+
+async function startPipeline() {
+    if (state.isRunning) {
+        showToast('流水线正在运行中', 'warning');
+        return;
+    }
+    
+    const selectedSources = Array.from(state.selectedSources).map(i => state.sources[i]);
+    if (selectedSources.length === 0) {
+        showToast('请至少选择一个RSS源', 'warning');
+        return;
+    }
+    
+    const customTopic = document.getElementById('customTopic').value.trim();
+    const articleCount = parseInt(document.getElementById('articleCount').value) || 3;
+    
+    state.isRunning = true;
+    updateStatus('运行中...', true);
+    
+    // 显示进度区域
+    const progressSection = document.getElementById('progressSection');
+    progressSection.style.display = 'block';
+    initStageIndicator();
+    
+    // 禁用启动按钮
+    const startBtn = document.getElementById('startBtn');
+    startBtn.disabled = true;
+    startBtn.innerHTML = `<svg class="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.3"/><path d="M12 2a10 10 0 0110 10"/></svg><span>运行中...</span>`;
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/pipeline`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                sources: selectedSources,
+                topics: customTopic ? [customTopic] : []
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success' || result.status === 'started') {
+            showToast('流水线启动成功', 'success');
+            pollPipelineStatus();
+        } else {
+            throw new Error(result.message || '启动失败');
+        }
+    } catch (error) {
+        console.error('启动流水线失败:', error);
+        showToast(`启动失败: ${error.message}`, 'error');
+        resetPipelineState();
+    }
+}
+
+function initStageIndicator() {
+    const stageIndicator = document.getElementById('stageIndicator');
+    stageIndicator.innerHTML = `<div class="stage-line"></div>` + STAGES.map((stage, index) => `
+        <div class="stage-item" id="stage-${stage.id}">
+            <div class="stage-icon">${index + 1}</div>
+            <div class="stage-label">${stage.label}</div>
+        </div>
+    `).join('');
+    
+    // 清空日志
+    document.getElementById('logContainer').innerHTML = '';
+}
+
+function updateStage(stageId, status) {
+    const stageElement = document.getElementById(`stage-${stageId}`);
+    if (!stageElement) return;
+    
+    stageElement.classList.remove('active', 'completed');
+    if (status === 'active') stageElement.classList.add('active');
+    if (status === 'completed') stageElement.classList.add('completed');
+}
+
+function addLog(message, type = 'info') {
+    const logContainer = document.getElementById('logContainer');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    entry.innerHTML = `
+        <span class="log-time">${formatTime(new Date())}</span>
+        <span class="log-message">${escapeHtml(message)}</span>
+    `;
+    logContainer.appendChild(entry);
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+async function pollPipelineStatus() {
+    // 模拟进度更新（实际应用中应该从服务器获取状态）
+    const stages = ['fetch', 'expand', 'summarize', 'image', 'publish'];
+    let currentStage = 0;
+    
+    const poll = async () => {
+        if (!state.isRunning) return;
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/status`);
+            const data = await response.json();
+            
+            // 更新阶段
+            if (data.current_stage) {
+                stages.forEach((stage, index) => {
+                    if (index < stages.indexOf(data.current_stage)) {
+                        updateStage(stage, 'completed');
+                    } else if (stage === data.current_stage) {
+                        updateStage(stage, 'active');
+                    }
+                });
+            }
+            
+            // 添加日志
+            if (data.logs && data.logs.length > 0) {
+                const lastLog = data.logs[data.logs.length - 1];
+                addLog(lastLog.message, lastLog.type || 'info');
+            }
+            
+            if (data.status === 'completed') {
+                showToast('流水线执行完成', 'success');
+                resetPipelineState();
+                loadArticles();
+            } else if (data.status === 'error') {
+                showToast(`执行失败: ${data.error}`, 'error');
+                resetPipelineState();
+            } else {
+                setTimeout(poll, 2000);
+            }
+        } catch (error) {
+            console.error('轮询状态失败:', error);
+            setTimeout(poll, 3000);
+        }
+    };
+    
+    poll();
+}
+
+function resetPipelineState() {
+    state.isRunning = false;
+    updateStatus('就绪', false);
+    
+    const startBtn = document.getElementById('startBtn');
+    startBtn.disabled = false;
+    startBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        <span>启动流水线</span>
+    `;
+}
+
+function cancelPipeline() {
+    state.isRunning = false;
+    updateStatus('已取消', false);
+    addLog('用户取消了流水线', 'warning');
+    resetPipelineState();
+    
+    fetch(`${API_BASE}/api/cancel`, { method: 'POST' })
+        .catch(console.error);
+}
+
+// ============================================
+// 文章管理
+// ============================================
+
+async function loadArticles() {
+    const container = document.getElementById('articlesContainer');
+    
+    try {
+        const response = await fetch(`${API_BASE}/api/articles`);
+        const data = await response.json();
+        
+        state.articles = data.articles || [];
+        renderArticles();
+    } catch (error) {
+        console.error('加载文章失败:', error);
+        container.innerHTML = `<div class="empty-state"><p class="empty-desc">加载失败</p></div>`;
+    }
+}
+
+function renderArticles() {
+    const container = document.getElementById('articlesContainer');
+    const countBadge = document.getElementById('articleCountBadge');
+    
+    countBadge.textContent = `${state.articles.length} 篇`;
+    
+    if (state.articles.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-illustration">
+                    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="12" y1="18" x2="12" y2="12"/>
+                        <line x1="9" y1="15" x2="15" y2="15"/>
+                    </svg>
+                </div>
+                <h3 class="empty-title">暂无文章</h3>
+                <p class="empty-desc">选择RSS源并启动流水线来生成文章</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = state.articles.map(article => `
+        <div class="article-card">
+            <div class="article-header">
+                <h3 class="article-title">${escapeHtml(article.title)}</h3>
+                <span class="status-badge ${article.published ? 'success' : 'pending'}">
+                    ${article.published ? '已发布' : '待发布'}
+                </span>
+            </div>
+            <div class="article-meta">
+                <div class="meta-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                    </svg>
+                    ${formatDate(article.date)}
+                </div>
+                <div class="meta-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    ${article.wordCount || 0} 字
+                </div>
+            </div>
+            <div class="article-actions">
+                <button class="btn btn-sm btn-ghost" onclick="previewArticle('${article.id}')">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    预览
                 </button>
-                <button onclick="removeRssSource(${index})" title="删除">
-                    <i class="ri-delete-bin-line"></i>
+                <button class="btn btn-sm btn-primary" onclick="publishArticle('${article.id}')" ${article.published ? 'disabled' : ''}>
+                    ${article.published ? '已发布' : '发布'}
                 </button>
             </div>
         </div>
     `).join('');
+}
+
+function formatDate(dateStr) {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
+
+async function previewArticle(id) {
+    const article = state.articles.find(a => a.id === id);
+    if (!article) return;
     
-    document.getElementById('rss-list').innerHTML = html;
+    // 简单预览，可以扩展为模态框
+    window.open(`${API_BASE}/api/articles/${id}`, '_blank');
 }
 
-// 切换RSS源状态
-async function toggleRssSource(index) {
-    config.rss.sources[index].enabled = !config.rss.sources[index].enabled;
-    await api('/config', 'POST', config);
-    loadRssSources();
-}
-
-// 删除RSS源
-async function removeRssSource(index) {
-    if (!confirm('确定要删除此RSS源吗？')) return;
-    
-    config.rss.sources.splice(index, 1);
-    await api('/config', 'POST', config);
-    loadRssSources();
-    loadStats();
-    showToast('RSS源已删除');
-}
-
-// 预览RSS
-async function previewRss() {
+async function publishArticle(id) {
     try {
-        showLoading('抓取RSS内容...');
-        const result = await api('/rss/fetch', 'POST');
+        const response = await fetch(`${API_BASE}/api/articles/${id}/publish`, { method: 'POST' });
+        const result = await response.json();
         
-        if (result.items.length === 0) {
-            document.getElementById('rss-preview').innerHTML = '<p class="placeholder">未获取到内容</p>';
-            return;
-        }
-        
-        const html = result.items.slice(0, 10).map(item => `
-            <div class="list-item">
-                <div class="list-item-info">
-                    <div class="list-item-title">${item.title}</div>
-                    <div class="list-item-meta">${item.source_name} · ${new Date(item.published).toLocaleDateString()}</div>
-                </div>
-                <button class="btn btn-sm btn-secondary" onclick="useRssItem('${item.title.replace(/'/g, "\\'")}', '${item.link}')">
-                    使用
-                </button>
-            </div>
-        `).join('');
-        
-        document.getElementById('rss-preview').innerHTML = html;
-        showToast(`获取到 ${result.count} 条内容`);
-    } catch (e) {
-        showToast(e.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-// 使用RSS条目
-function useRssItem(title, url) {
-    switchTab('content');
-    document.getElementById('gen-title').value = title;
-    document.getElementById('gen-source').value = url;
-}
-
-// 显示文章结果
-function showArticleResult(article) {
-    document.getElementById('result-panel').style.display = 'block';
-    document.getElementById('result-title').textContent = article.title;
-    
-    const tagsHtml = article.tags?.map(t => `<span>${t}</span>`).join('') || '';
-    document.getElementById('result-tags').innerHTML = tagsHtml;
-    
-    if (article.image_url) {
-        document.getElementById('result-image').innerHTML = `<img src="${article.image_url}" style="max-width:100%;border-radius:8px;">`;
-    } else {
-        document.getElementById('result-image').innerHTML = '';
-    }
-    
-    document.getElementById('result-content').textContent = article.content;
-    
-    // 滚动到结果
-    document.getElementById('result-panel').scrollIntoView({behavior: 'smooth'});
-}
-
-// 发布当前文章
-async function publishCurrentArticle() {
-    if (!currentArticle) {
-        showToast('没有可发布的文章', 'error');
-        return;
-    }
-    
-    try {
-        showLoading('发布中...');
-        const result = await api('/publish', 'POST', currentArticle);
-        showToast('发布成功');
-        loadStats();
-        loadArticles();
-    } catch (e) {
-        showToast(e.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-// 复制文章内容
-function copyArticleContent() {
-    if (!currentArticle) return;
-    
-    const text = `# ${currentArticle.title}\n\n${currentArticle.content}`;
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('已复制到剪贴板');
-    });
-}
-
-// 加载文章列表
-async function loadArticles() {
-    try {
-        const result = await api('/posts');
-        const posts = result.posts || [];
-        
-        if (posts.length === 0) {
-            document.getElementById('articles-list').innerHTML = '<p class="placeholder">暂无文章</p>';
-            return;
-        }
-        
-        const html = posts.map(post => `
-            <div class="list-item">
-                <div class="list-item-info">
-                    <div class="list-item-title">${post.title}</div>
-                    <div class="list-item-meta">${post.date || '未知日期'} · ${post.tags?.join(', ') || ''}</div>
-                </div>
-                <div class="list-item-actions">
-                    <button onclick="viewArticle('${post.filename}')" title="查看">
-                        <i class="ri-eye-line"></i>
-                    </button>
-                </div>
-            </div>
-        `).join('');
-        
-        document.getElementById('articles-list').innerHTML = html;
-    } catch (e) {
-        document.getElementById('articles-list').innerHTML = '<p class="placeholder">加载失败</p>';
-    }
-}
-
-// 运行完整流水线
-async function runPipeline() {
-    if (!confirm('确定要运行完整流水线吗？这将自动抓取RSS、生成文章并发布。')) return;
-    
-    try {
-        showLoading('运行流水线中...');
-        const result = await api('/pipeline', 'POST');
-        showToast(`处理完成: ${result.processed} 篇文章`);
-        loadStats();
-        loadArticles();
-    } catch (e) {
-        showToast(e.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-// 抓取RSS
-async function fetchRss() {
-    try {
-        showLoading('抓取RSS...');
-        const result = await api('/rss/fetch', 'POST');
-        showToast(`获取到 ${result.count} 条内容`);
-        
-        // 跳转到RSS页面查看
-        switchTab('rss');
-        previewRss();
-    } catch (e) {
-        showToast(e.message, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-// 切换定时任务
-let schedulerRunning = false;
-
-async function toggleScheduler() {
-    try {
-        if (schedulerRunning) {
-            await api('/scheduler/stop', 'POST');
-            schedulerRunning = false;
-            showToast('定时任务已停止');
-            document.getElementById('scheduler-status').innerHTML = `
-                <span class="dot"></span>
-                <span>定时任务: 已停止</span>
-            `;
+        if (result.status === 'success') {
+            showToast('文章发布成功', 'success');
+            loadArticles();
         } else {
-            await api('/scheduler/start', 'POST');
-            schedulerRunning = true;
-            showToast('定时任务已启动');
-            document.getElementById('scheduler-status').innerHTML = `
-                <span class="dot active"></span>
-                <span>定时任务: 运行中</span>
-            `;
+            throw new Error(result.message);
         }
-    } catch (e) {
-        showToast(e.message, 'error');
+    } catch (error) {
+        showToast(`发布失败: ${error.message}`, 'error');
     }
 }
 
-// 日期选择器
-function initDatePicker() {
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('log-date').value = today;
+function showArticles() {
+    // 滚动到文章区域
+    document.querySelector('.articles-section').scrollIntoView({ behavior: 'smooth' });
 }
 
-// 加载日志
-async function loadLogs() {
-    const date = document.getElementById('log-date').value;
-    
-    try {
-        const result = await api(`/logs?date=${date}`);
-        const logs = result.logs || [];
-        
-        if (logs.length === 0) {
-            document.getElementById('log-container').innerHTML = '<p class="placeholder">暂无日志</p>';
-            return;
-        }
-        
-        const html = logs.map(log => {
-            const cls = log.includes('[ERROR]') ? 'ERROR' : log.includes('[WARNING]') ? 'WARNING' : 'INFO';
-            return `<div class="log-line ${cls}">${escapeHtml(log)}</div>`;
-        }).join('');
-        
-        document.getElementById('log-container').innerHTML = html;
-        document.getElementById('log-container').scrollTop = document.getElementById('log-container').scrollHeight;
-    } catch (e) {
-        document.getElementById('log-container').innerHTML = '<p class="placeholder">加载失败</p>';
-    }
-}
+// ============================================
+// 工具函数
+// ============================================
 
-// HTML转义
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// 查看文章
-async function viewArticle(filename) {
-    try {
-        // 这里可以打开一个模态框或跳转到编辑页面
-        showToast('查看文章: ' + filename);
-    } catch (e) {
-        showToast(e.message, 'error');
+// 添加CSS动画类
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
     }
-}
+    .animate-spin {
+        animation: spin 1s linear infinite;
+    }
+`;
+document.head.appendChild(style);
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+    loadRssSources();
+    loadArticles();
+});
