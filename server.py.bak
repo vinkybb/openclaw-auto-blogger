@@ -221,7 +221,7 @@ def api_fetch():
     
     try:
         # 尝试用 OpenClaw 抓取
-        from modules.local_worker import get_worker
+        from modules.openclaw_worker import get_worker
         worker = get_worker()
         
         # 读取 RSS 配置
@@ -308,7 +308,7 @@ def api_expand():
     
     # 尝试使用 OpenClaw
     try:
-        from modules.local_worker import get_worker
+        from modules.openclaw_worker import get_worker
         worker = get_worker()
         use_openclaw = True
     except:
@@ -399,7 +399,7 @@ def api_pipeline():
     try:
         # 尝试使用 OpenClaw 完整流水线
         try:
-            from modules.local_worker import get_worker
+            from modules.openclaw_worker import get_worker
             worker = get_worker()
             
             # 读取 RSS 配置
