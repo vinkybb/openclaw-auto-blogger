@@ -1,0 +1,24 @@
+# 博客流水线依赖
+
+# RSS 解析
+feedparser>=6.0.0
+
+# HTTP 请求 (用于 OpenClaw API 调用)
+requests>=2.28.0
+
+# 配置文件解析
+pyyaml>=6.0
+
+# 图片处理 (可选)
+pillow>=9.0.0
+
+# Markdown 处理
+markdown>=3.4.0
+
+# 图片下载
+# 用于 Unsplash 图片获取
+httpx>=0.23.0
+
+# Web 服务
+flask>=2.0.0
+flask-cors>=3.0.0
