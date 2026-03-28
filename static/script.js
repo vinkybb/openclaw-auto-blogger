@@ -14,8 +14,8 @@ const state = {
 // 阶段定义
 const STAGES = [
     { id: 'fetch', label: '获取内容', icon: '📥' },
-    { id: 'expand', label: '话题扩展', icon: '🔄' },
     { id: 'summarize', label: '生成摘要', icon: '✨' },
+    { id: 'expand', label: '话题扩写', icon: '🔄' },
     { id: 'image', label: '配图生成', icon: '🎨' },
     { id: 'publish', label: '发布文章', icon: '🚀' }
 ];

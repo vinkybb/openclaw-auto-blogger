@@ -14,6 +14,7 @@ from pathlib import Path
 from datetime import datetime
 from flask import Flask, Response, render_template, jsonify, request, stream_with_context
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 
@@ -311,8 +312,37 @@ def stage_fetch_rss(max_items=10, checkpoint=None):
     emit_event('log', {'msg': f'✅ 抓取完成: {len(all_articles)} 篇文章', 'stage': 'fetch'})
     return all_articles, None, None
 
+def process_single_summary(article, index, total):
+    """处理单篇文章的摘要（用于并行）"""
+    with state.lock:
+        if state.cancelled:
+            return None, article, True
+        state.stage_progress = index + 1
+        state.current_item = article.get('title', '')[:50]
+    
+    emit_event('log', {'msg': f'📝 摘要: {article.get("title", "")[:30]}...', 'stage': 'summarize'})
+    emit_event('stage', {'name': 'summarize', 'label': '📝 AI摘要', 'progress': (index+1) / total * 100})
+    
+    prompt = f"""请为以下文章生成一个简洁的摘要（100字以内）：
+
+标题: {article.get('title', '')}
+内容: {article.get('summary', article.get('description', ''))[:1000]}
+
+只输出摘要内容，不要其他说明。"""
+    
+    summary, err = run_openclaw_stream(prompt, stage='summarize')
+    if err:
+        if err == 'cancelled':
+            return None, article, True
+        emit_event('log', {'msg': f'⚠️ 摘要失败: {err}', 'stage': 'summarize', 'level': 'warn'})
+        summary = article.get('summary', '')[:200]
+    
+    article['ai_summary'] = summary
+    emit_event('item', {'stage': 'summarize', 'title': article.get('title', '')[:30]})
+    return article, None, False
+
 def stage_summarize(articles, checkpoint=None):
-    """AI 摘要阶段"""
+    """AI 摘要阶段 - 并行处理"""
     emit_event('stage', {'name': 'summarize', 'label': '📝 AI摘要', 'progress': 0})
     
     with state.lock:
@@ -321,71 +351,49 @@ def stage_summarize(articles, checkpoint=None):
         state.stage_total = len(articles)
     
     if checkpoint:
-        # 跳过已处理的
         processed_ids = set(checkpoint.get('processed_ids', []))
         articles = [a for a in articles if a.get('link') not in processed_ids]
     
-    summarized = []
-    for i, article in enumerate(articles):
-        with state.lock:
-            if state.cancelled:
-                return None, 'cancelled', {'processed_ids': [a['link'] for a in summarized]}
-            state.stage_progress = i + 1
-            state.current_item = article.get('title', '')[:50]
-        
-        emit_event('log', {'msg': f'📝 摘要: {article.get("title", "")[:30]}...', 'stage': 'summarize'})
-        emit_event('stage', {'name': 'summarize', 'label': '📝 AI摘要', 'progress': (i+1) / len(articles) * 100})
-        
-        prompt = f"""请为以下文章生成一个简洁的摘要（100字以内）：
-
-标题: {article.get('title', '')}
-内容: {article.get('summary', article.get('description', ''))[:1000]}
-
-只输出摘要内容，不要其他说明。"""
-        
-        summary, err = run_openclaw_stream(prompt, stage='summarize')
-        if err:
-            if err == 'cancelled':
-                return None, 'cancelled', {'processed_ids': [a['link'] for a in summarized]}
-            emit_event('log', {'msg': f'⚠️ 摘要失败: {err}', 'stage': 'summarize', 'level': 'warn'})
-            summary = article.get('summary', '')[:200]
-        
-        article['ai_summary'] = summary
-        summarized.append(article)
-        emit_event('item', {'stage': 'summarize', 'title': article.get('title', '')[:30]})
+    config = load_config()
+    ai_config = config.get('ai', {})
+    parallel_workers = ai_config.get('parallel_workers', 3)  # 默认并行3篇
     
-    emit_event('log', {'msg': f'✅ 摘要完成: {len(summarized)} 篇', 'stage': 'summarize'})
+    summarized = []
+    
+    # 使用线程池并行处理
+    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+        futures = {
+            executor.submit(process_single_summary, article, i, len(articles)): article
+            for i, article in enumerate(articles)
+        }
+        
+        for future in as_completed(futures):
+            with state.lock:
+                if state.cancelled:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return None, 'cancelled', {'processed_ids': [a['link'] for a in summarized]}
+            
+            result_article, err, cancelled = future.result()
+            if cancelled:
+                return None, 'cancelled', {'processed_ids': [a['link'] for a in summarized]}
+            if result_article:
+                summarized.append(result_article)
+    
+    emit_event('log', {'msg': f'✅ 摘要完成: {len(summarized)} 篇（并行 {parallel_workers} 线程）', 'stage': 'summarize'})
     return summarized, None, None
 
-def stage_expand(articles, checkpoint=None):
-    """AI 扩写阶段"""
-    emit_event('stage', {'name': 'expand', 'label': '✍️ AI扩写', 'progress': 0})
-    
+def process_single_expand(article, index, total, expand_style):
+    """处理单篇文章的扩写（用于并行）"""
     with state.lock:
-        state.current_stage = 'expand'
-        state.stage_progress = 0
-        state.stage_total = len(articles)
+        if state.cancelled:
+            return None, article, True
+        state.stage_progress = index + 1
+        state.current_item = article.get('title', '')[:50]
     
-    if checkpoint:
-        expanded_titles = set(checkpoint.get('expanded_titles', []))
-        articles = [a for a in articles if a.get('title') not in expanded_titles]
+    emit_event('log', {'msg': f'✍️ 扩写: {article.get("title", "")[:30]}...', 'stage': 'expand'})
+    emit_event('stage', {'name': 'expand', 'label': '✍️ AI扩写', 'progress': (index+1) / total * 100})
     
-    expanded_articles = []
-    for i, article in enumerate(articles):
-        with state.lock:
-            if state.cancelled:
-                return None, 'cancelled', {'expanded_titles': [a['title'] for a in expanded_articles]}
-            state.stage_progress = i + 1
-            state.current_item = article.get('title', '')[:50]
-        
-        emit_event('log', {'msg': f'✍️ 扩写: {article.get("title", "")[:30]}...', 'stage': 'expand'})
-        emit_event('stage', {'name': 'expand', 'label': '✍️ AI扩写', 'progress': (i+1) / len(articles) * 100})
-        
-        config = load_config()
-        ai_config = config.get('ai', {})
-        expand_style = ai_config.get('expand_style', '技术博客风格')
-        
-        prompt = f"""请基于以下摘要，扩写一篇完整的博客文章（800-1500字）：
+    prompt = f"""请基于以下摘要，扩写一篇完整的博客文章（800-1500字）：
 
 标题: {article.get('title', '')}
 摘要: {article.get('ai_summary', article.get('summary', ''))}
@@ -397,29 +405,69 @@ def stage_expand(articles, checkpoint=None):
 4. 直接输出文章内容，使用 Markdown 格式
 
 开始扩写："""
-        
-        content, err = run_openclaw_stream(prompt, stage='expand', timeout=180)
-        if err:
-            if err == 'cancelled':
-                return None, 'cancelled', {'expanded_titles': [a['title'] for a in expanded_articles]}
-            emit_event('log', {'msg': f'⚠️ 扩写失败: {err}', 'stage': 'expand', 'level': 'warn'})
-            content = f"# {article.get('title', '')}\n\n{article.get('ai_summary', '扩写失败，请重试。')}"
-        
-        article['expanded_content'] = content
-        expanded_articles.append(article)
-        
-        # 保存文章
-        output_dir = Path(__file__).parent / 'output' / 'articles'
-        output_dir.mkdir(parents=True, exist_ok=True)
-        safe_title = article.get('title', 'untitled').replace('/', '_').replace('\\', '_')[:50]
-        output_file = output_dir / f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_{safe_title}.md'
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(content)
-        
-        emit_event('item', {'stage': 'expand', 'title': article.get('title', '')[:30], 'file': str(output_file)})
-        emit_event('article', {'title': article.get('title', ''), 'file': str(output_file)})
     
-    emit_event('log', {'msg': f'✅ 扩写完成: {len(expanded_articles)} 篇', 'stage': 'expand'})
+    content, err = run_openclaw_stream(prompt, stage='expand', timeout=180)
+    if err:
+        if err == 'cancelled':
+            return None, article, True
+        emit_event('log', {'msg': f'⚠️ 扩写失败: {err}', 'stage': 'expand', 'level': 'warn'})
+        content = f"# {article.get('title', '')}\n\n{article.get('ai_summary', '扩写失败，请重试。')}"
+    
+    article['expanded_content'] = content
+    
+    # 保存文章
+    output_dir = Path(__file__).parent / 'output' / 'articles'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    safe_title = article.get('title', 'untitled').replace('/', '_').replace('\\', '_')[:50]
+    output_file = output_dir / f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_{safe_title}.md'
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(content)
+    
+    emit_event('item', {'stage': 'expand', 'title': article.get('title', '')[:30], 'file': str(output_file)})
+    emit_event('article', {'title': article.get('title', ''), 'file': str(output_file)})
+    
+    return article, None, False
+
+def stage_expand(articles, checkpoint=None):
+    """AI 扩写阶段 - 并行处理"""
+    emit_event('stage', {'name': 'expand', 'label': '✍️ AI扩写', 'progress': 0})
+    
+    with state.lock:
+        state.current_stage = 'expand'
+        state.stage_progress = 0
+        state.stage_total = len(articles)
+    
+    if checkpoint:
+        expanded_titles = set(checkpoint.get('expanded_titles', []))
+        articles = [a for a in articles if a.get('title') not in expanded_titles]
+    
+    config = load_config()
+    ai_config = config.get('ai', {})
+    expand_style = ai_config.get('expand_style', '技术博客风格')
+    parallel_workers = ai_config.get('parallel_workers', 3)  # 默认并行3篇
+    
+    expanded_articles = []
+    
+    # 使用线程池并行处理
+    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+        futures = {
+            executor.submit(process_single_expand, article, i, len(articles), expand_style): article
+            for i, article in enumerate(articles)
+        }
+        
+        for future in as_completed(futures):
+            with state.lock:
+                if state.cancelled:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return None, 'cancelled', {'expanded_titles': [a['title'] for a in expanded_articles]}
+            
+            result_article, err, cancelled = future.result()
+            if cancelled:
+                return None, 'cancelled', {'expanded_titles': [a['title'] for a in expanded_articles]}
+            if result_article:
+                expanded_articles.append(result_article)
+    
+    emit_event('log', {'msg': f'✅ 扩写完成: {len(expanded_articles)} 篇（并行 {parallel_workers} 线程）', 'stage': 'expand'})
     return expanded_articles, None, None
 
 def stage_publish(articles, checkpoint=None):
