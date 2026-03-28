@@ -390,14 +390,14 @@ function renderArticles() {
                 </div>
             </div>
             <div class="article-actions">
-                <button class="btn btn-sm btn-ghost" onclick="previewArticle('${article.id}')">
+                <button class="btn btn-sm btn-ghost" onclick="previewArticle('${article.file}')">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                         <circle cx="12" cy="12" r="3"/>
                     </svg>
                     预览
                 </button>
-                <button class="btn btn-sm btn-primary" onclick="publishArticle('${article.id}')" ${article.published ? 'disabled' : ''}>
+                <button class="btn btn-sm btn-primary" onclick="publishArticle('${article.file}')">
                     ${article.published ? '已发布' : '发布'}
                 </button>
             </div>
@@ -410,12 +410,27 @@ function formatDate(dateStr) {
     return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 }
 
-async function previewArticle(id) {
-    const article = state.articles.find(a => a.id === id);
-    if (!article) return;
-    
-    // 简单预览，可以扩展为模态框
-    window.open(`${API_BASE}/api/articles/${id}`, '_blank');
+function previewArticle(file) {
+    fetch(`${API_BASE}/api/articles/${encodeURIComponent(file)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                showToast(data.error, 'error');
+                return;
+            }
+            // 显示模态框
+            document.getElementById('previewTitle').textContent = data.title || '文章预览';
+            // 渲染 Markdown
+            const html = marked.parse(data.content || '');
+            document.getElementById('previewBody').innerHTML = html;
+            document.getElementById('previewModal').style.display = 'flex';
+        })
+        .catch(err => showToast('加载失败: ' + err.message, 'error'));
+}
+
+function closePreviewModal() {
+    document.getElementById('previewModal').style.display = 'none';
+}
 }
 
 async function publishArticle(id) {

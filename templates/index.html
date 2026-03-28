@@ -192,9 +192,26 @@
         </main>
     </div>
 
+    <!-- 预览模态框 -->
+    <div id="previewModal" class="modal" style="display: none;">
+        <div class="modal-backdrop" onclick="closePreviewModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="previewTitle" class="modal-title">文章预览</h3>
+                <button class="modal-close" onclick="closePreviewModal()">×</button>
+            </div>
+            <div id="previewBody" class="modal-body markdown-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closePreviewModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast 容器 -->
     <div id="toastContainer" class="toast-container"></div>
 
+    <!-- Markdown 渲染库 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="/static/script.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
