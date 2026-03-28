@@ -519,7 +519,7 @@ async function runPipeline() {
     
     try {
         showLoading('运行流水线中...');
-        const result = await api('/pipeline/run', 'POST');
+        const result = await api('/pipeline', 'POST');
         showToast(`处理完成: ${result.processed} 篇文章`);
         loadStats();
         loadArticles();
