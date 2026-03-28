@@ -197,7 +197,7 @@
             log('🚀 启动完整流水线...', 'info');
             
             try {
-                const result = await api('/pipeline', 'POST');
+                const result = await api('/pipeline', 'POST', {});
                 if (result.error) throw new Error(result.error);
                 
                 log('✅ 流水线完成!', 'success');
