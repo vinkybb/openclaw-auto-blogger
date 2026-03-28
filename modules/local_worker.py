@@ -38,11 +38,15 @@ class LocalWorker:
             return {}
     
     def _get_ai_config(self) -> dict:
-        """获取 AI 配置，优先环境变量"""
+        """获取 AI 配置，优先配置文件，然后环境变量"""
+        # 从配置文件读取
+        ai_config = self.config.get('ai', {})
+        
         return {
-            'api_key': os.environ.get('OPENAI_API_KEY') or os.environ.get('AI_API_KEY'),
-            'base_url': os.environ.get('AI_BASE_URL') or 'https://api.openai.com/v1',
-            'model': os.environ.get('AI_MODEL') or 'gpt-3.5-turbo',
+            'api_key': ai_config.get('api_key') or os.environ.get('OPENAI_API_KEY') or os.environ.get('AI_API_KEY'),
+            'base_url': ai_config.get('base_url') or os.environ.get('AI_BASE_URL') or 'https://api.openai.com/v1',
+            'model': ai_config.get('model') or os.environ.get('AI_MODEL') or 'gpt-3.5-turbo',
+            'timeout': ai_config.get('timeout', 120),
         }
     
     def _has_ai_config(self) -> bool:
@@ -100,7 +104,7 @@ class LocalWorker:
                     'temperature': 0.7,
                     'max_tokens': 500
                 },
-                timeout=60
+                timeout=self.ai_config.get('timeout', 60)
             )
             
             if resp.status_code == 200:
@@ -154,7 +158,7 @@ class LocalWorker:
                     'temperature': 0.8,
                     'max_tokens': 2000
                 },
-                timeout=120
+                timeout=self.ai_config.get('timeout', 120)
             )
             
             if resp.status_code == 200:
