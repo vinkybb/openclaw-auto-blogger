@@ -246,7 +246,7 @@ function addLog(message, type = 'info') {
 async function pollPipelineStatus() {
     // 模拟进度更新（实际应用中应该从服务器获取状态）
     const stages = ['fetch', 'expand', 'summarize', 'image', 'publish'];
-    let currentStage = 0;
+    let lastLogIndex = 0; // 记录上次看到的日志位置
     
     const poll = async () => {
         if (!state.isRunning) return;
@@ -266,10 +266,13 @@ async function pollPipelineStatus() {
                 });
             }
             
-            // 添加日志
+            // 添加所有新日志（从上次位置开始）
             if (data.logs && data.logs.length > 0) {
-                const lastLog = data.logs[data.logs.length - 1];
-                addLog(lastLog.message, lastLog.type || 'info');
+                for (let i = lastLogIndex; i < data.logs.length; i++) {
+                    const log = data.logs[i];
+                    addLog(log.msg || log.message, log.type || 'info');
+                }
+                lastLogIndex = data.logs.length;
             }
             
             if (data.status === 'completed') {
@@ -280,7 +283,7 @@ async function pollPipelineStatus() {
                 showToast(`执行失败: ${data.error}`, 'error');
                 resetPipelineState();
             } else {
-                setTimeout(poll, 2000);
+                setTimeout(poll, 1000); // 缩短轮询间隔到1秒
             }
         } catch (error) {
             console.error('轮询状态失败:', error);

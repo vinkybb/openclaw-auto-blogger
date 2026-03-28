@@ -1,107 +1,72 @@
+#!/usr/bin/env python3
 """
-RSS订阅获取模块
+RSS Feed Fetcher Module
+使用 requests + feedparser 实现带超时的 RSS 抓取
 """
-
+import json
+import sys
+import argparse
+import requests
 import feedparser
-from datetime import datetime
-from typing import List, Dict
-import hashlib
+from io import BytesIO
 
 
 class RSSFetcher:
-    def __init__(self, config: dict):
-        self.sources = config.get('sources', [])
-        self.fetch_interval = config.get('fetch_interval', 3600)
+    """RSS Feed Fetcher 类（保持兼容性）"""
     
-    def fetch_feed(self, url: str, name: str = "") -> List[Dict]:
-        """抓取单个RSS源"""
-        items = []
-        
-        try:
-            feed = feedparser.parse(url)
-            
-            for entry in feed.entries:
-                # 生成唯一ID
-                item_id = hashlib.md5(entry.get('link', entry.get('title', '')).encode()).hexdigest()[:12]
-                
-                # 解析内容
-                content = entry.get('content', [{}])[0].get('value', '')
-                if not content:
-                    content = entry.get('summary', entry.get('description', ''))
-                
-                # 解析日期
-                published = entry.get('published_parsed') or entry.get('updated_parsed')
-                if published:
-                    pub_date = datetime(*published[:6]).isoformat()
-                else:
-                    pub_date = datetime.now().isoformat()
-                
-                items.append({
-                    'id': item_id,
-                    'title': entry.get('title', '无标题'),
-                    'link': entry.get('link', ''),
-                    'content': content,
-                    'summary': entry.get('summary', ''),
-                    'author': entry.get('author', ''),
-                    'published': pub_date,
-                    'source_name': name,
-                    'source_url': url
-                })
-                
-        except Exception as e:
-            print(f"[RSS] 抓取失败 {name} ({url}): {e}")
-        
-        return items
+    def __init__(self, timeout=30):
+        self.timeout = timeout
     
-    def fetch_all(self) -> List[Dict]:
-        """抓取所有启用的RSS源"""
-        all_items = []
-        
-        for source in self.sources:
-            if source.get('enabled', True):
-                items = self.fetch_feed(source['url'], source.get('name', ''))
-                all_items.extend(items)
-                print(f"[RSS] {source.get('name', source['url'])}: {len(items)} 条")
-        
-        # 按日期排序
-        all_items.sort(key=lambda x: x['published'], reverse=True)
-        
-        return all_items
+    def fetch(self, source_url, name=None, max_articles=10):
+        """抓取 RSS feed 并返回文章列表"""
+        return fetch_rss(source_url, name, max_articles, self.timeout)
+
+
+def fetch_rss(source_url, name=None, max_articles=10, timeout=30):
+    """抓取 RSS feed 并返回文章列表"""
+    articles = []
     
-    def add_source(self, name: str, url: str, config: dict) -> dict:
-        """添加新的RSS源"""
-        sources = config.get('rss', {}).get('sources', [])
-        sources.append({
-            'name': name,
-            'url': url,
-            'enabled': True
-        })
-        return config
+    try:
+        # 使用 requests 设置超时
+        response = requests.get(source_url, timeout=timeout)
+        response.raise_for_status()
+        
+        # 使用 feedparser 解析内容
+        feed = feedparser.parse(BytesIO(response.content))
+        
+        if feed.bozo and feed.bozo_exception:
+            print(f"RSS parse warning: {feed.bozo_exception}", file=sys.stderr)
+        
+        for entry in feed.entries[:max_articles]:
+            article = {
+                'title': entry.title or 'Untitled',
+                'link': entry.link,
+                'summary': entry.get('summary', entry.get('description', '')),
+                'source': name or feed.feed.get('title', 'Unknown'),
+                'published': entry.get('published', entry.get('updated', ''))
+            }
+            articles.append(article)
+        
+    except requests.Timeout:
+        print(f"RSS fetch timeout: {source_url}", file=sys.stderr)
+    except requests.RequestException as e:
+        print(f"RSS fetch error: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
     
-    def remove_source(self, url: str, config: dict) -> dict:
-        """移除RSS源"""
-        sources = config.get('rss', {}).get('sources', [])
-        config['rss']['sources'] = [s for s in sources if s['url'] != url]
-        return config
+    return articles
 
 
 if __name__ == '__main__':
-    import argparse
-    import json
-    import yaml
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--source', required=True, help='RSS feed URL')
+    parser.add_argument('--name', default='', help='Feed name')
+    parser.add_argument('--max', type=int, default=10, help='Max articles')
+    parser.add_argument('--timeout', type=int, default=30, help='Request timeout')
     
-    parser = argparse.ArgumentParser(description='RSS订阅抓取')
-    parser.add_argument('--source', type=str, required=True, help='RSS源URL')
-    parser.add_argument('--name', type=str, default='', help='RSS源名称')
-    parser.add_argument('--max', type=int, default=10, help='最大文章数')
     args = parser.parse_args()
     
-    fetcher = RSSFetcher({})
-    items = fetcher.fetch_feed(args.source, args.name)
+    articles = fetch_rss(args.source, args.name, args.max, args.timeout)
     
-    # 限制数量
-    if args.max and len(items) > args.max:
-        items = items[:args.max]
-    
-    # 输出JSON
-    print(json.dumps(items, ensure_ascii=False))
+    # 输出 JSON 到 stdout
+    print(json.dumps(articles, ensure_ascii=False))

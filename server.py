@@ -121,84 +121,78 @@ def load_config():
             return yaml.safe_load(f)
     return {}
 
-def run_openclaw_stream(prompt, stage='unknown', timeout=120):
-    """运行 OpenClaw 并流式输出结果"""
-    emit_event('log', {'msg': f'🤖 调用 OpenClaw ({stage})...', 'stage': stage})
+def call_llm_api(prompt, timeout=120):
+    """直接调用 LLM API（OpenAI兼容）"""
+    import requests
+    
+    # 从 config.yaml 加载配置
+    config = load_config()
+    ai_config = config.get('ai', {})
+    
+    api_url = ai_config.get('base_url', 'http://42.193.169.81:18789/v1/chat/completions')
+    if not api_url.endswith('/chat/completions'):
+        api_url = api_url.rstrip('/') + '/chat/completions'
+    
+    api_key = ai_config.get('api_key', 'vinkybbvinkybb')
+    model = ai_config.get('model', 'openclaw')
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 4000
+    }
     
     try:
-        proc = subprocess.Popen(
-            ['openclaw', 'ask', '--model', 'custom-coding-dashscope-aliyuncs-com/glm-5', prompt],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            preexec_fn=os.setsid  # 创建新的进程组，便于取消
-        )
+        response = requests.post(api_url, headers=headers, json=payload, timeout=timeout)
+        response.raise_for_status()
+        result = response.json()
         
-        with state.lock:
-            state.processes[stage] = proc
-        
-        output_lines = []
-        start_time = time.time()
-        
-        while True:
-            # 检查取消
-            with state.lock:
-                if state.cancelled:
-                    emit_event('log', {'msg': f'⚠️ 任务已取消 ({stage})', 'stage': stage})
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                    except:
-                        pass
-                    return None, "cancelled"
-            
-            # 检查超时
-            if time.time() - start_time > timeout:
-                proc.terminate()
-                return None, "timeout"
-            
-            # 读取输出
-            line = proc.stdout.readline()
-            if line:
-                line = line.strip()
-                if line:
-                    output_lines.append(line)
-                    # 流式推送每一行
-                    emit_event('stream', {
-                        'stage': stage,
-                        'line': line,
-                        'partial': True
-                    })
-            
-            # 检查进程结束
-            if proc.poll() is not None:
-                # 读取剩余输出
-                remaining = proc.stdout.read()
-                if remaining:
-                    for l in remaining.strip().split('\n'):
-                        if l:
-                            output_lines.append(l)
-                            emit_event('stream', {
-                                'stage': stage,
-                                'line': l,
-                                'partial': False
-                            })
-                break
-            
-            time.sleep(0.01)
-        
-        # 清理进程引用
-        with state.lock:
-            state.processes.pop(stage, None)
-        
-        if proc.returncode != 0:
-            stderr = proc.stderr.read()
-            return None, f"Error: {stderr}"
-        
-        return '\n'.join(output_lines), None
-        
+        if "choices" in result and len(result["choices"]) > 0:
+            content = result["choices"][0]["message"]["content"]
+            return content, None
+        else:
+            return None, "no_response"
+    except requests.exceptions.Timeout:
+        return None, "timeout"
     except Exception as e:
         return None, str(e)
+
+def run_openclaw_stream(prompt, stage='unknown', timeout=120):
+    """调用 LLM API 并返回结果"""
+    emit_event('log', {'msg': f'🤖 调用 AI ({stage})...', 'stage': stage})
+    
+    # 检查取消
+    with state.lock:
+        if state.cancelled:
+            return None, "cancelled"
+    
+    result, error = call_llm_api(prompt, timeout)
+    
+    if error:
+        emit_event('log', {'msg': f'❌ AI调用失败 ({stage}): {error}', 'stage': stage})
+        return None, error
+    
+    # 流式推送结果（按行）
+    lines = result.strip().split('\n')
+    for line in lines:
+        emit_event('stream', {
+            'stage': stage,
+            'line': line,
+            'partial': True
+        })
+    
+    emit_event('stream', {
+        'stage': stage,
+        'line': result,
+        'partial': False
+    })
+    
+    return result, None
 
 def run_module(module_name, *args):
     """运行 Python 模块"""
@@ -227,11 +221,20 @@ def normalize_source_selection(selected):
     """将前端选择值转换为config中的名称/URL"""
     normalized = []
     for s in selected:
-        # 先检查映射表
-        if s.lower() in SOURCE_ALIAS_MAP:
-            normalized.extend(SOURCE_ALIAS_MAP[s.lower()])
-        # 再添加原值（可能已经是名称或URL）
-        normalized.append(s)
+        # 处理 dict 类型（前端可能传完整对象）
+        if isinstance(s, dict):
+            name = s.get('name', '')
+            url = s.get('url', '')
+            # 检查映射表
+            if name.lower() in SOURCE_ALIAS_MAP:
+                normalized.extend(SOURCE_ALIAS_MAP[name.lower()])
+            normalized.extend([name, url])
+        else:
+            # 字符串类型
+            s_str = str(s).lower()
+            if s_str in SOURCE_ALIAS_MAP:
+                normalized.extend(SOURCE_ALIAS_MAP[s_str])
+            normalized.append(s)
     return normalized
 
 def stage_fetch_rss(max_items=10, checkpoint=None):
@@ -250,13 +253,14 @@ def stage_fetch_rss(max_items=10, checkpoint=None):
     
     # 根据用户选择过滤RSS源
     if selected:
-        # 将前端值映射到实际源名称/URL
+        # 将前端值映射到实际源名称/URL（只保留字符串）
         normalized = normalize_source_selection(selected)
+        normalized_strs = [str(x) for x in normalized if not isinstance(x, dict)]
         rss_sources = [s for s in rss_sources 
-                       if s.get('name') in normalized 
-                       or s.get('url') in normalized
-                       or any(alias in s.get('name', '').lower() or alias in s.get('url', '').lower() 
-                              for alias in normalized)]
+                       if s.get('name') in normalized_strs 
+                       or s.get('url') in normalized_strs
+                       or any(alias.lower() in s.get('name', '').lower() or alias.lower() in s.get('url', '').lower() 
+                              for alias in normalized_strs)]
         emit_event('log', {'msg': f'🎯 已筛选 {len(rss_sources)} 个RSS源', 'stage': 'fetch'})
     
     if checkpoint:
@@ -703,7 +707,7 @@ def api_publish():
     def run():
         try:
             articles_dir = Path(__file__).parent / 'output' / 'articles'
-            articles = [{'title': f.stem, 'file': str(f)} for f in articles_dir.glob('*.md')]
+            articles = [{'title': f.stem, 'file': f.name} for f in articles_dir.glob('*.md')]
             published, _, _ = stage_publish(articles)
             with state.lock:
                 state.running = False
@@ -734,12 +738,37 @@ def api_articles():
             preview = content[:200].replace('\n', ' ')
             articles.append({
                 'title': title,
-                'file': str(f),
+                'file': f.name,
                 'preview': preview,
                 'date': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M'),
                 'status': '草稿'
             })
     return jsonify({'articles': articles})
+
+
+@app.route('/api/articles/<path:filename>', methods=['GET'])
+def api_get_article(filename):
+    """获取单篇文章内容"""
+    try:
+        article_path = Path(__file__).parent / 'output' / 'articles' / filename
+        if not article_path.exists():
+            article_path = Path(filename)
+
+        if not article_path.exists():
+            return jsonify({'error': '文件不存在'}), 404
+
+        content = article_path.read_text(encoding='utf-8')
+        lines = content.split('\n')
+        title = lines[0].replace('# ', '').replace('#', '') if lines else '无标题'
+
+        return jsonify({
+            'filename': filename,
+            'title': title,
+            'content': content,
+            'preview': content[:500]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/articles/<path:filename>', methods=['DELETE'])
@@ -803,7 +832,8 @@ def api_update_article(filename):
 def api_get_channels():
     """获取可用的发布渠道"""
     channels = []
-    publish_config = CONFIG.get('publish', {})
+    config = load_config()
+    publish_config = config.get('publish', {})
     
     if publish_config.get('local', {}).get('enabled'):
         channels.append({
