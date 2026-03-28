@@ -19,7 +19,7 @@ class OpenClawWorker:
     """OpenClaw 任务执行器"""
     
     def __init__(self):
-        self.gateway_url = os.environ.get('OPENCLAW_GATEWAY', 'http://localhost:4400')
+        self.gateway_url = os.environ.get('OPENCLAW_GATEWAY', 'http://localhost:18789')
         self.api_base = f'{self.gateway_url}/api'
     
     def spawn_task(self, task: str, timeout: int = 300, model: str = None) -> dict:
