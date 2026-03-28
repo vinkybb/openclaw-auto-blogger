@@ -3,303 +3,883 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>博客流水线</title>
+    <title>博客流水线 Dashboard</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
             min-height: 100vh;
-            color: #fff;
-        }
-        .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
-        
-        header { text-align: center; margin-bottom: 40px; }
-        header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        header p { color: #8892b0; font-size: 1.1em; }
-        
-        .status-bar {
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
             padding: 20px;
-            margin-bottom: 30px;
-            display: flex;
-            justify-content: space-around;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
             text-align: center;
+            padding: 30px 0;
         }
-        .status-item { flex: 1; }
-        .status-value { font-size: 2em; font-weight: bold; color: #64ffda; }
-        .status-label { color: #8892b0; font-size: 0.9em; }
         
-        .actions {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
+        h1 {
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
         }
-        .btn {
-            padding: 20px;
+        
+        .subtitle {
+            color: #888;
+            font-size: 1.1em;
+        }
+        
+        /* 控制面板 */
+        .control-panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            margin: 20px 0;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            padding: 12px 28px;
+            font-size: 16px;
+            font-weight: 600;
             border: none;
-            border-radius: 12px;
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 1em;
-            font-weight: 500;
+            transition: all 0.3s ease;
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 10px;
-            transition: all 0.3s;
+            gap: 8px;
         }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
         }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(102,126,234,0.3); }
+        
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(245, 87, 108, 0.4);
+        }
+        
         .btn-secondary {
             background: rgba(255,255,255,0.1);
             color: white;
+            border: 1px solid rgba(255,255,255,0.2);
         }
-        .btn-secondary:hover { background: rgba(255,255,255,0.15); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
         
-        .running { animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .btn-secondary:hover:not(:disabled) {
+            background: rgba(255,255,255,0.15);
+            transform: translateY(-2px);
+        }
         
-        .section { background: rgba(255,255,255,0.03); border-radius: 16px; padding: 25px; margin-bottom: 20px; }
-        .section h2 { margin-bottom: 20px; color: #64ffda; font-size: 1.2em; }
+        .btn-resume {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
         
-        .log-container {
-            background: #0d1117;
-            border-radius: 8px;
-            padding: 15px;
-            max-height: 400px;
+        .btn-resume:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(56, 239, 125, 0.4);
+        }
+        
+        /* 进度显示 */
+        .progress-section {
+            margin: 24px 0;
+        }
+        
+        .stage-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            position: relative;
+        }
+        
+        .stage-indicator::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            background: rgba(255,255,255,0.1);
+            z-index: 0;
+        }
+        
+        .stage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1;
+            opacity: 0.4;
+            transition: all 0.3s ease;
+        }
+        
+        .stage.active {
+            opacity: 1;
+        }
+        
+        .stage.completed {
+            opacity: 1;
+        }
+        
+        .stage.completed .stage-icon {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        
+        .stage.active .stage-icon {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7); }
+            50% { box-shadow: 0 0 0 12px rgba(102, 126, 234, 0); }
+        }
+        
+        .stage-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .stage-label {
+            font-size: 12px;
+            color: #888;
+        }
+        
+        /* 进度条 */
+        .progress-bar {
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        
+        .progress-text {
+            text-align: center;
+            color: #888;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        
+        /* 日志面板 */
+        .log-panel {
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 20px 0;
+            max-height: 300px;
             overflow-y: auto;
             font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.85em;
+            font-size: 13px;
         }
-        .log-entry { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .log-time { color: #6e7681; margin-right: 10px; }
-        .log-info { color: #58a6ff; }
-        .log-success { color: #3fb950; }
-        .log-error { color: #f85149; }
         
-        .articles { display: grid; gap: 15px; }
-        .article {
+        .log-entry {
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            gap: 12px;
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .log-time {
+            color: #666;
+            flex-shrink: 0;
+        }
+        
+        .log-msg {
+            color: #ccc;
+        }
+        
+        .log-entry.warn .log-msg {
+            color: #f0ad4e;
+        }
+        
+        .log-entry.error .log-msg {
+            color: #f5576c;
+        }
+        
+        .log-entry.success .log-msg {
+            color: #38ef7d;
+        }
+        
+        /* 文章列表 */
+        .articles-section {
+            margin: 30px 0;
+        }
+        
+        .section-title {
+            font-size: 1.5em;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .article-list {
+            display: grid;
+            gap: 16px;
+        }
+        
+        .article-card {
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 20px;
-            cursor: pointer;
-            transition: all 0.3s;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
         }
-        .article:hover { background: rgba(255,255,255,0.08); transform: translateX(5px); }
-        .article h3 { margin-bottom: 8px; color: #fff; }
-        .article-meta { color: #8892b0; font-size: 0.85em; }
-        .article-preview { margin-top: 10px; color: #a8b2d1; font-size: 0.9em; line-height: 1.5; }
         
-        .empty-state { text-align: center; padding: 40px; color: #6e7681; }
-        .empty-state i { font-size: 3em; margin-bottom: 15px; }
+        .article-card:hover {
+            background: rgba(255,255,255,0.08);
+            transform: translateY(-2px);
+        }
+        
+        .article-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #fff;
+        }
+        
+        .article-preview {
+            color: #888;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+        
+        .article-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .article-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+        }
+        
+        /* 流式输出显示 */
+        .stream-output {
+            background: rgba(0,0,0,0.4);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 12px 0;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #38ef7d;
+            display: none;
+        }
+        
+        .stream-output.visible {
+            display: block;
+        }
+        
+        /* 检查点提示 */
+        .checkpoint-notice {
+            background: rgba(17, 153, 142, 0.2);
+            border: 1px solid rgba(56, 239, 125, 0.3);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 16px 0;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .checkpoint-notice.visible {
+            display: flex;
+        }
+        
+        .checkpoint-text {
+            color: #38ef7d;
+            font-size: 14px;
+        }
+        
+        /* 状态指示器 */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+        
+        .status-dot.running {
+            background: #38ef7d;
+            animation: blink 1s infinite;
+        }
+        
+        .status-dot.idle {
+            background: #666;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .status-text {
+            font-size: 14px;
+            color: #888;
+        }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8em; }
+            .button-group { flex-direction: column; }
+            button { width: 100%; justify-content: center; }
+            .stage-indicator { flex-wrap: wrap; gap: 16px; }
+            .stage-indicator::before { display: none; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🚀 博客流水线</h1>
-            <p>自动抓取 · AI扩写 · 自动发布</p>
+            <h1>📝 博客流水线</h1>
+            <p class="subtitle">RSS → AI摘要 → AI扩写 → 发布</p>
         </header>
         
-        <div class="status-bar">
-            <div class="status-item">
-                <div class="status-value" id="stat-rss">0</div>
-                <div class="status-label">RSS源</div>
+        <div class="control-panel">
+            <!-- 状态指示器 -->
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-text" id="statusText">空闲</span>
             </div>
-            <div class="status-item">
-                <div class="status-value" id="stat-articles">0</div>
-                <div class="status-label">已生成</div>
+            
+            <!-- 检查点提示 -->
+            <div class="checkpoint-notice" id="checkpointNotice">
+                <span class="checkpoint-text">📌 有未完成的任务可以继续</span>
+                <button class="btn-resume" id="resumeBtn" onclick="resumePipeline()">
+                    ▶️ 继续任务
+                </button>
             </div>
-            <div class="status-item">
-                <div class="status-value" id="stat-published">0</div>
-                <div class="status-label">已发布</div>
+            
+            <!-- 主按钮组 -->
+            <div class="button-group">
+                <button class="btn-primary" id="startBtn" onclick="startPipeline()">
+                    🚀 运行完整流水线
+                </button>
+                <button class="btn-danger" id="cancelBtn" onclick="cancelPipeline()" style="display: none;">
+                    🛑 取消任务
+                </button>
+            </div>
+            
+            <!-- 分步按钮 -->
+            <div class="button-group">
+                <button class="btn-secondary" id="fetchBtn" onclick="runFetch()">
+                    📡 仅抓取RSS
+                </button>
+                <button class="btn-secondary" id="expandBtn" onclick="runExpand()">
+                    ✍️ 仅AI扩写
+                </button>
+                <button class="btn-secondary" id="publishBtn" onclick="runPublish()">
+                    📤 仅发布
+                </button>
+            </div>
+            
+            <!-- 阶段指示器 -->
+            <div class="progress-section">
+                <div class="stage-indicator">
+                    <div class="stage" id="stage-fetch">
+                        <div class="stage-icon">📡</div>
+                        <div class="stage-label">RSS抓取</div>
+                    </div>
+                    <div class="stage" id="stage-summarize">
+                        <div class="stage-icon">📝</div>
+                        <div class="stage-label">AI摘要</div>
+                    </div>
+                    <div class="stage" id="stage-expand">
+                        <div class="stage-icon">✍️</div>
+                        <div class="stage-label">AI扩写</div>
+                    </div>
+                    <div class="stage" id="stage-publish">
+                        <div class="stage-icon">📤</div>
+                        <div class="stage-label">发布</div>
+                    </div>
+                </div>
+                
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">等待开始...</div>
+            </div>
+            
+            <!-- 流式输出 -->
+            <div class="stream-output" id="streamOutput"></div>
+            
+            <!-- 日志面板 -->
+            <div class="log-panel" id="logPanel">
+                <div class="log-entry">
+                    <span class="log-time">--:--:--</span>
+                    <span class="log-msg">等待操作...</span>
+                </div>
             </div>
         </div>
         
-        <div class="actions">
-            <button class="btn btn-primary" id="btn-run" onclick="runPipeline()">
-                <span>▶</span> 一键运行
-            </button>
-            <button class="btn btn-secondary" id="btn-fetch" onclick="fetchRSS()">
-                <span>📡</span> 抓取RSS
-            </button>
-            <button class="btn btn-secondary" id="btn-gen" onclick="generateContent()">
-                <span>✍️</span> 生成内容
-            </button>
-            <button class="btn btn-secondary" id="btn-publish" onclick="publishAll()">
-                <span>📤</span> 发布文章
-            </button>
-        </div>
-        
-        <div class="section">
-            <h2>📋 运行日志</h2>
-            <div class="log-container" id="logs">
-                <div class="empty-state">等待执行...</div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2>📄 最近文章</h2>
-            <div class="articles" id="articles">
-                <div class="empty-state">暂无文章，点击"一键运行"开始</div>
+        <!-- 文章列表 -->
+        <div class="articles-section">
+            <h2 class="section-title">📄 已生成文章</h2>
+            <div class="article-list" id="articleList">
+                <p style="color: #666;">加载中...</p>
             </div>
         </div>
     </div>
     
     <script>
+        // ============ 状态管理 ============
         let isRunning = false;
+        let eventSource = null;
+        let currentStage = null;
         
-        async function api(endpoint, method = 'GET', data = null) {
-            const opts = { 
-                method,
-                headers: { 'Content-Type': 'application/json' }
-            };
-            if (data) {
-                opts.body = JSON.stringify(data);
-            }
-            const res = await fetch('/api' + endpoint, opts);
-            return res.json();
-        }
-        
-        function log(msg, type = 'info') {
-            const container = document.getElementById('logs');
-            const time = new Date().toLocaleTimeString('zh-CN');
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">${time}</span><span class="log-${type}">${msg}</span>`;
+        // ============ UI 更新函数 ============
+        function updateStatus(running, text) {
+            isRunning = running;
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const startBtn = document.getElementById('startBtn');
+            const cancelBtn = document.getElementById('cancelBtn');
+            const fetchBtn = document.getElementById('fetchBtn');
+            const expandBtn = document.getElementById('expandBtn');
+            const publishBtn = document.getElementById('publishBtn');
             
-            if (container.querySelector('.empty-state')) {
-                container.innerHTML = '';
-            }
-            container.appendChild(entry);
-            container.scrollTop = container.scrollHeight;
-        }
-        
-        function setRunning(state) {
-            isRunning = state;
-            document.querySelectorAll('.btn').forEach(btn => btn.disabled = state);
-            if (state) {
-                document.getElementById('btn-run').classList.add('running');
+            if (running) {
+                dot.classList.add('running');
+                dot.classList.remove('idle');
+                statusText.textContent = text || '运行中...';
+                startBtn.disabled = true;
+                cancelBtn.style.display = 'inline-flex';
+                fetchBtn.disabled = true;
+                expandBtn.disabled = true;
+                publishBtn.disabled = true;
             } else {
-                document.getElementById('btn-run').classList.remove('running');
+                dot.classList.remove('running');
+                dot.classList.add('idle');
+                statusText.textContent = text || '空闲';
+                startBtn.disabled = false;
+                cancelBtn.style.display = 'none';
+                fetchBtn.disabled = false;
+                expandBtn.disabled = false;
+                publishBtn.disabled = false;
             }
         }
         
-        async function runPipeline() {
-            if (isRunning) return;
-            setRunning(true);
-            log('🚀 启动完整流水线...', 'info');
+        function setStageActive(stageName) {
+            // 重置所有阶段
+            document.querySelectorAll('.stage').forEach(el => {
+                el.classList.remove('active', 'completed');
+            });
             
-            try {
-                const result = await api('/pipeline', 'POST', {});
-                if (result.error) throw new Error(result.error);
+            // 设置已完成和当前阶段
+            const stages = ['fetch', 'summarize', 'expand', 'publish'];
+            const currentIndex = stages.indexOf(stageName);
+            
+            stages.forEach((stage, index) => {
+                const el = document.getElementById(`stage-${stage}`);
+                if (index < currentIndex) {
+                    el.classList.add('completed');
+                } else if (index === currentIndex) {
+                    el.classList.add('active');
+                }
+            });
+            
+            currentStage = stageName;
+        }
+        
+        function updateProgress(percent, text) {
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressText').textContent = text;
+        }
+        
+        function addLog(msg, type = 'info') {
+            const panel = document.getElementById('logPanel');
+            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-msg">${msg}</span>
+            `;
+            
+            panel.appendChild(entry);
+            panel.scrollTop = panel.scrollHeight;
+        }
+        
+        function showStreamOutput(text, append = false) {
+            const el = document.getElementById('streamOutput');
+            if (append) {
+                el.textContent += text;
+            } else {
+                el.textContent = text;
+            }
+            el.classList.add('visible');
+            el.scrollTop = el.scrollHeight;
+        }
+        
+        function hideStreamOutput() {
+            document.getElementById('streamOutput').classList.remove('visible');
+        }
+        
+        function showCheckpointNotice(hasCheckpoint) {
+            const notice = document.getElementById('checkpointNotice');
+            if (hasCheckpoint) {
+                notice.classList.add('visible');
+            } else {
+                notice.classList.remove('visible');
+            }
+        }
+        
+        function renderArticles(articles) {
+            const list = document.getElementById('articleList');
+            if (!articles || articles.length === 0) {
+                list.innerHTML = '<p style="color: #666;">暂无文章</p>';
+                return;
+            }
+            
+            list.innerHTML = articles.map(article => `
+                <div class="article-card">
+                    <div class="article-title">${escapeHtml(article.title)}</div>
+                    <div class="article-preview">${escapeHtml(article.preview)}...</div>
+                    <div class="article-meta">
+                        <span>${article.date}</span>
+                        <span class="article-status">${article.status}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // ============ SSE 事件处理 ============
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            eventSource = new EventSource('/api/stream');
+            
+            eventSource.addEventListener('state', (e) => {
+                const data = JSON.parse(e.data);
+                updateStatus(data.running, data.running ? data.current_stage : '空闲');
                 
-                log('✅ 流水线完成!', 'success');
-                if (result.articles) {
-                    log(`📝 生成 ${result.articles.length} 篇文章`, 'info');
+                if (data.current_stage) {
+                    setStageActive(data.current_stage);
                 }
-                if (result.published) {
-                    log(`📤 发布 ${result.published} 篇文章`, 'success');
+                
+                if (data.progress !== undefined && data.total > 0) {
+                    const percent = (data.progress / data.total) * 100;
+                    updateProgress(percent, `阶段 ${data.progress}/${data.total}`);
                 }
+                
+                showCheckpointNotice(!!data.checkpoint);
+            });
+            
+            eventSource.addEventListener('start', (e) => {
+                const data = JSON.parse(e.data);
+                addLog(data.msg, 'info');
+                updateStatus(true, '运行中');
+                hideStreamOutput();
+            });
+            
+            eventSource.addEventListener('stage', (e) => {
+                const data = JSON.parse(e.data);
+                setStageActive(data.name);
+                updateProgress(0, data.label);
+            });
+            
+            eventSource.addEventListener('log', (e) => {
+                const data = JSON.parse(e.data);
+                const type = data.level || 'info';
+                addLog(data.msg, type);
+            });
+            
+            eventSource.addEventListener('stream', (e) => {
+                const data = JSON.parse(e.data);
+                if (data.partial) {
+                    showStreamOutput(data.line + '\n', true);
+                }
+            });
+            
+            eventSource.addEventListener('item', (e) => {
+                const data = JSON.parse(e.data);
+                // 更新进度
+            });
+            
+            eventSource.addEventListener('article', (e) => {
+                const data = JSON.parse(e.data);
+                addLog(`📄 生成文章: ${data.title}`, 'success');
                 loadArticles();
-            } catch (e) {
-                log(`❌ 错误: ${e.message}`, 'error');
-            }
+            });
             
-            setRunning(false);
-        }
-        
-        async function fetchRSS() {
-            if (isRunning) return;
-            setRunning(true);
-            log('📡 抓取RSS源...', 'info');
+            eventSource.addEventListener('cancelled', (e) => {
+                const data = JSON.parse(e.data);
+                addLog(data.msg, 'warn');
+                showCheckpointNotice(!!data.checkpoint);
+                updateStatus(false, '已取消');
+            });
             
-            try {
-                const result = await api('/fetch', 'POST', { max_items: 10 });
-                if (result.error) throw new Error(result.error);
-                log(`✅ 抓取 ${result.articles?.length || 0} 篇文章`, 'success');
-            } catch (e) {
-                log(`❌ 错误: ${e.message}`, 'error');
-            }
+            eventSource.addEventListener('complete', (e) => {
+                const data = JSON.parse(e.data);
+                addLog(data.msg, 'success');
+                updateStatus(false, '完成');
+                
+                // 标记所有阶段完成
+                document.querySelectorAll('.stage').forEach(el => {
+                    el.classList.add('completed');
+                    el.classList.remove('active');
+                });
+                updateProgress(100, '✅ 完成');
+            });
             
-            setRunning(false);
-        }
-        
-        async function generateContent() {
-            if (isRunning) return;
-            setRunning(true);
-            log('✍️ 生成内容...', 'info');
+            eventSource.addEventListener('error', (e) => {
+                const data = JSON.parse(e.data);
+                addLog(data.msg, 'error');
+                updateStatus(false, '错误');
+            });
             
-            try {
-                const result = await api('/expand', 'POST', {});
-                if (result.error) throw new Error(result.error);
-                log(`✅ 内容生成完成`, 'success');
+            eventSource.addEventListener('end', (e) => {
+                updateStatus(false, '空闲');
                 loadArticles();
-            } catch (e) {
-                log(`❌ 错误: ${e.message}`, 'error');
-            }
+            });
             
-            setRunning(false);
+            eventSource.onerror = (e) => {
+                console.log('SSE error, reconnecting...');
+                setTimeout(connectSSE, 3000);
+            };
         }
         
-        async function publishAll() {
+        // ============ API 调用 ============
+        async function startPipeline() {
             if (isRunning) return;
-            setRunning(true);
-            log('📤 发布文章...', 'info');
+            
+            updateStatus(true, '启动中...');
+            addLog('🚀 启动流水线...', 'info');
             
             try {
-                const result = await api('/publish', 'POST', {});
-                if (result.error) throw new Error(result.error);
-                log(`✅ 发布 ${result.published || 0} 篇文章`, 'success');
-            } catch (e) {
-                log(`❌ 错误: ${e.message}`, 'error');
+                const res = await fetch('/api/pipeline', { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.error) {
+                    addLog(`❌ 启动失败: ${data.error}`, 'error');
+                    updateStatus(false);
+                }
+            } catch (err) {
+                addLog(`❌ 网络错误: ${err.message}`, 'error');
+                updateStatus(false);
             }
+        }
+        
+        async function cancelPipeline() {
+            if (!isRunning) return;
             
-            setRunning(false);
+            addLog('🛑 正在取消任务...', 'warn');
+            
+            try {
+                const res = await fetch('/api/cancel', { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.status === 'cancelled') {
+                    addLog('✅ 任务已取消', 'warn');
+                }
+            } catch (err) {
+                addLog(`❌ 取消失败: ${err.message}`, 'error');
+            }
+        }
+        
+        async function resumePipeline() {
+            if (isRunning) return;
+            
+            updateStatus(true, '继续任务...');
+            addLog('▶️ 从检查点继续任务...', 'info');
+            
+            try {
+                const res = await fetch('/api/resume', { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.error) {
+                    addLog(`❌ 继续失败: ${data.error}`, 'error');
+                    updateStatus(false);
+                } else {
+                    showCheckpointNotice(false);
+                }
+            } catch (err) {
+                addLog(`❌ 网络错误: ${err.message}`, 'error');
+                updateStatus(false);
+            }
+        }
+        
+        async function runFetch() {
+            if (isRunning) return;
+            updateStatus(true, '抓取RSS...');
+            addLog('📡 开始抓取RSS...', 'info');
+            
+            try {
+                const res = await fetch('/api/fetch', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ max_items: 10 })
+                });
+                const data = await res.json();
+                if (data.error) {
+                    addLog(`❌ 抓取失败: ${data.error}`, 'error');
+                    updateStatus(false);
+                }
+            } catch (err) {
+                addLog(`❌ 网络错误: ${err.message}`, 'error');
+                updateStatus(false);
+            }
+        }
+        
+        async function runExpand() {
+            if (isRunning) return;
+            updateStatus(true, 'AI扩写...');
+            addLog('✍️ 开始AI扩写...', 'info');
+            
+            try {
+                const res = await fetch('/api/expand', { method: 'POST' });
+                const data = await res.json();
+                if (data.error) {
+                    addLog(`❌ 扩写失败: ${data.error}`, 'error');
+                    updateStatus(false);
+                }
+            } catch (err) {
+                addLog(`❌ 网络错误: ${err.message}`, 'error');
+                updateStatus(false);
+            }
+        }
+        
+        async function runPublish() {
+            if (isRunning) return;
+            updateStatus(true, '发布文章...');
+            addLog('📤 开始发布...', 'info');
+            
+            try {
+                const res = await fetch('/api/publish', { method: 'POST' });
+                const data = await res.json();
+                if (data.error) {
+                    addLog(`❌ 发布失败: ${data.error}`, 'error');
+                    updateStatus(false);
+                }
+            } catch (err) {
+                addLog(`❌ 网络错误: ${err.message}`, 'error');
+                updateStatus(false);
+            }
         }
         
         async function loadArticles() {
             try {
-                const result = await api('/articles');
-                const container = document.getElementById('articles');
-                
-                if (!result.articles || result.articles.length === 0) {
-                    container.innerHTML = '<div class="empty-state">暂无文章</div>';
-                    return;
-                }
-                
-                container.innerHTML = result.articles.map(a => `
-                    <div class="article">
-                        <h3>${a.title || '无标题'}</h3>
-                        <div class="article-meta">${a.date || ''} · ${a.status || '草稿'}</div>
-                        <div class="article-preview">${(a.preview || '').substring(0, 150)}...</div>
-                    </div>
-                `).join('');
-                
-                document.getElementById('stat-articles').textContent = result.articles.length;
-            } catch (e) {
-                console.error(e);
+                const res = await fetch('/api/articles');
+                const data = await res.json();
+                renderArticles(data.articles);
+            } catch (err) {
+                console.error('Failed to load articles:', err);
             }
         }
         
         async function loadStatus() {
             try {
-                const result = await api('/status');
-                document.getElementById('stat-rss').textContent = result.rss_sources || 0;
-            } catch (e) {
-                console.error(e);
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                updateStatus(data.running, data.running ? data.current_stage : '空闲');
+                showCheckpointNotice(!!data.checkpoint);
+                
+                if (data.current_stage) {
+                    setStageActive(data.current_stage);
+                }
+                
+                if (data.progress !== undefined && data.total > 0) {
+                    updateProgress((data.progress / data.total) * 100, `阶段 ${data.progress}/${data.total}`);
+                }
+            } catch (err) {
+                console.error('Failed to load status:', err);
             }
         }
         
-        // 初始化
-        loadStatus();
-        loadArticles();
+        // ============ 初始化 ============
+        document.addEventListener('DOMContentLoaded', () => {
+            connectSSE();
+            loadArticles();
+            loadStatus();
+        });
     </script>
 </body>
 </html>

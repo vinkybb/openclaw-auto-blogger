@@ -1,489 +1,675 @@
 #!/usr/bin/env python3
-"""
-博客流水线 - OpenClaw 驱动的全自动博客生成与发布系统
-
-核心理念：
-- 前端极简，只做触发和展示
-- 所有复杂逻辑交给 OpenClaw subagent 执行
-- 通过 sessions_spawn API 调用 OpenClaw 能力
-"""
+"""博客流水线服务端 - 流式架构 + 取消/继续机制"""
 
 import os
+import sys
 import json
-import glob
-from datetime import datetime
+import yaml
+import subprocess
+import threading
+import queue
+import time
+import signal
 from pathlib import Path
-from flask import Flask, render_template, jsonify, request
-from flask_cors import CORS
+from datetime import datetime
+from flask import Flask, Response, render_template, jsonify, request, stream_with_context
+from collections import defaultdict
 
-app = Flask(__name__, template_folder='templates', static_folder='static')
-CORS(app)
+app = Flask(__name__)
 
-# 路径配置
-BASE_DIR = Path(__file__).parent
-OUTPUT_DIR = BASE_DIR / 'output'
-ARTICLES_DIR = OUTPUT_DIR / 'articles'
+# ============ 全局状态管理 ============
 
-# 确保目录存在
-ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
-
-# ==================== OpenClaw 集成 ====================
-
-def call_openclaw(task: str, timeout: int = 300) -> dict:
-    """
-    调用 OpenClaw 执行任务
-    通过 openclaw 命令或内部 API
-    """
-    import subprocess
+class PipelineState:
+    """流水线状态管理器"""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.reset()
     
-    # 使用 openclaw 的 sessions_spawn 等效命令
-    # 实际部署时可以通过 HTTP API 调用 OpenClaw
-    result = {
-        'success': False,
-        'output': None,
-        'error': None
+    def reset(self):
+        self.running = False
+        self.paused = False
+        self.cancelled = False
+        self.current_stage = None
+        self.current_item = None
+        self.progress = 0
+        self.total = 0
+        self.stage_progress = 0  # 当前阶段的进度
+        self.stage_total = 0
+        self.logs = []
+        self.articles = []
+        self.processes = {}  # stage -> subprocess.Popen
+        self.checkpoint = None  # 用于继续任务的检查点
+        self.error = None
+    
+    def to_dict(self):
+        return {
+            'running': self.running,
+            'paused': self.paused,
+            'cancelled': self.cancelled,
+            'current_stage': self.current_stage,
+            'current_item': self.current_item,
+            'progress': self.progress,
+            'total': self.total,
+            'stage_progress': self.stage_progress,
+            'stage_total': self.stage_total,
+            'logs': self.logs[-50:],  # 最近50条日志
+            'articles': self.articles,
+            'checkpoint': self.checkpoint,
+            'error': str(self.error) if self.error else None
+        }
+
+state = PipelineState()
+event_queue = queue.Queue()  # SSE 事件队列
+
+# ============ SSE 事件推送 ============
+
+def emit_event(event_type, data):
+    """推送 SSE 事件"""
+    event = {
+        'type': event_type,
+        'data': data,
+        'timestamp': datetime.now().isoformat()
     }
+    event_queue.put(event)
+    # 同时更新 state.logs
+    if event_type in ['log', 'error']:
+        with state.lock:
+            state.logs.append({
+                'time': datetime.now().strftime('%H:%M:%S'),
+                'type': event_type,
+                'msg': data.get('msg', '')
+            })
+
+def sse_stream():
+    """SSE 流生成器"""
+    def generate():
+        # 先发送当前状态
+        with state.lock:
+            yield f"event: state\ndata: {json.dumps(state.to_dict())}\n\n"
+        
+        while True:
+            try:
+                event = event_queue.get(timeout=30)
+                yield f"event: {event['type']}\ndata: {json.dumps(event['data'])}\n\n"
+                
+                # 如果收到终止信号，结束流
+                if event['type'] == 'end':
+                    break
+            except queue.Empty:
+                # 发送心跳
+                yield f"event: heartbeat\ndata: {json.dumps({'time': datetime.now().isoformat()})}\n\n"
+    
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+# ============ OpenClaw 调用 ============
+
+def load_config():
+    config_path = Path(__file__).parent / 'config.yaml'
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
+    return {}
+
+def run_openclaw_stream(prompt, stage='unknown', timeout=120):
+    """运行 OpenClaw 并流式输出结果"""
+    emit_event('log', {'msg': f'🤖 调用 OpenClaw ({stage})...', 'stage': stage})
     
     try:
-        # 这里我们用简化的方式：直接执行任务脚本
-        # 实际应该调用 OpenClaw 的 sessions_spawn API
-        proc = subprocess.run(
-            ['python3', '-c', task],
-            capture_output=True,
+        proc = subprocess.Popen(
+            ['openclaw', 'ask', '--model', 'custom-coding-dashscope-aliyuncs-com/glm-5', prompt],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
-            cwd=str(BASE_DIR)
+            bufsize=1,
+            preexec_fn=os.setsid  # 创建新的进程组，便于取消
         )
-        result['output'] = proc.stdout
-        result['success'] = proc.returncode == 0
+        
+        with state.lock:
+            state.processes[stage] = proc
+        
+        output_lines = []
+        start_time = time.time()
+        
+        while True:
+            # 检查取消
+            with state.lock:
+                if state.cancelled:
+                    emit_event('log', {'msg': f'⚠️ 任务已取消 ({stage})', 'stage': stage})
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                    except:
+                        pass
+                    return None, "cancelled"
+            
+            # 检查超时
+            if time.time() - start_time > timeout:
+                proc.terminate()
+                return None, "timeout"
+            
+            # 读取输出
+            line = proc.stdout.readline()
+            if line:
+                line = line.strip()
+                if line:
+                    output_lines.append(line)
+                    # 流式推送每一行
+                    emit_event('stream', {
+                        'stage': stage,
+                        'line': line,
+                        'partial': True
+                    })
+            
+            # 检查进程结束
+            if proc.poll() is not None:
+                # 读取剩余输出
+                remaining = proc.stdout.read()
+                if remaining:
+                    for l in remaining.strip().split('\n'):
+                        if l:
+                            output_lines.append(l)
+                            emit_event('stream', {
+                                'stage': stage,
+                                'line': l,
+                                'partial': False
+                            })
+                break
+            
+            time.sleep(0.01)
+        
+        # 清理进程引用
+        with state.lock:
+            state.processes.pop(stage, None)
+        
         if proc.returncode != 0:
-            result['error'] = proc.stderr
-    except subprocess.TimeoutExpired:
-        result['error'] = 'Task timeout'
+            stderr = proc.stderr.read()
+            return None, f"Error: {stderr}"
+        
+        return '\n'.join(output_lines), None
+        
     except Exception as e:
-        result['error'] = str(e)
-    
-    return result
+        return None, str(e)
 
+def run_module(module_name, *args):
+    """运行 Python 模块"""
+    result = subprocess.run(
+        [sys.executable, '-m', f'modules.{module_name}', *args],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parent
+    )
+    if result.returncode != 0:
+        raise Exception(result.stderr)
+    return result.stdout
 
-def spawn_agent(task: str, thinking: bool = True) -> dict:
-    """
-    通过 OpenClaw API spawn 一个 agent 来执行任务
-    这是最核心的方法 - 把工作交给 AI agent
-    """
-    # OpenClaw sessions_spawn API 调用
-    # 实际实现需要通过 HTTP 调用 OpenClaw gateway
-    import requests
+# ============ 流水线阶段 ============
+
+def stage_fetch_rss(max_items=10, checkpoint=None):
+    """RSS 抓取阶段"""
+    emit_event('stage', {'name': 'fetch', 'label': '📡 抓取RSS', 'progress': 0})
     
-    gateway_url = os.environ.get('OPENCLAW_GATEWAY', 'http://localhost:4400')
+    with state.lock:
+        state.current_stage = 'fetch'
+        state.stage_progress = 0
+        state.stage_total = 4  # RSS 源数量
+    
+    config = load_config()
+    rss_sources = config.get('rss', {}).get('sources', [])
+    
+    if checkpoint:
+        # 从检查点恢复
+        rss_sources = [s for s in rss_sources if s not in checkpoint.get('completed_sources', [])]
+    
+    all_articles = []
+    for i, source in enumerate(rss_sources):
+        # 检查取消
+        with state.lock:
+            if state.cancelled:
+                return None, 'cancelled', {'completed_sources': [s['url'] for s in rss_sources[:i]]}
+            state.stage_progress = i + 1
+            state.current_item = source.get('name', source.get('url', 'unknown'))
+        
+        emit_event('log', {'msg': f'📡 抓取: {source.get("name", source.get("url", ""))}', 'stage': 'fetch'})
+        emit_event('stage', {'name': 'fetch', 'label': '📡 抓取RSS', 'progress': (i+1) / len(rss_sources) * 100})
+        
+        try:
+            output = run_module('rss_fetcher', '--source', source['url'], '--max', str(max_items))
+            articles = json.loads(output) if output.strip() else []
+            all_articles.extend(articles)
+            emit_event('item', {'stage': 'fetch', 'count': len(articles)})
+        except Exception as e:
+            emit_event('log', {'msg': f'⚠️ 抓取失败: {e}', 'stage': 'fetch', 'level': 'warn'})
+    
+    # 保存到文件
+    output_dir = Path(__file__).parent / 'output' / 'raw'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / f'rss_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(all_articles, f, ensure_ascii=False, indent=2)
+    
+    emit_event('log', {'msg': f'✅ 抓取完成: {len(all_articles)} 篇文章', 'stage': 'fetch'})
+    return all_articles, None, None
+
+def stage_summarize(articles, checkpoint=None):
+    """AI 摘要阶段"""
+    emit_event('stage', {'name': 'summarize', 'label': '📝 AI摘要', 'progress': 0})
+    
+    with state.lock:
+        state.current_stage = 'summarize'
+        state.stage_progress = 0
+        state.stage_total = len(articles)
+    
+    if checkpoint:
+        # 跳过已处理的
+        processed_ids = set(checkpoint.get('processed_ids', []))
+        articles = [a for a in articles if a.get('link') not in processed_ids]
+    
+    summarized = []
+    for i, article in enumerate(articles):
+        with state.lock:
+            if state.cancelled:
+                return None, 'cancelled', {'processed_ids': [a['link'] for a in summarized]}
+            state.stage_progress = i + 1
+            state.current_item = article.get('title', '')[:50]
+        
+        emit_event('log', {'msg': f'📝 摘要: {article.get("title", "")[:30]}...', 'stage': 'summarize'})
+        emit_event('stage', {'name': 'summarize', 'label': '📝 AI摘要', 'progress': (i+1) / len(articles) * 100})
+        
+        prompt = f"""请为以下文章生成一个简洁的摘要（100字以内）：
+
+标题: {article.get('title', '')}
+内容: {article.get('summary', article.get('description', ''))[:1000]}
+
+只输出摘要内容，不要其他说明。"""
+        
+        summary, err = run_openclaw_stream(prompt, stage='summarize')
+        if err:
+            if err == 'cancelled':
+                return None, 'cancelled', {'processed_ids': [a['link'] for a in summarized]}
+            emit_event('log', {'msg': f'⚠️ 摘要失败: {err}', 'stage': 'summarize', 'level': 'warn'})
+            summary = article.get('summary', '')[:200]
+        
+        article['ai_summary'] = summary
+        summarized.append(article)
+        emit_event('item', {'stage': 'summarize', 'title': article.get('title', '')[:30]})
+    
+    emit_event('log', {'msg': f'✅ 摘要完成: {len(summarized)} 篇', 'stage': 'summarize'})
+    return summarized, None, None
+
+def stage_expand(articles, checkpoint=None):
+    """AI 扩写阶段"""
+    emit_event('stage', {'name': 'expand', 'label': '✍️ AI扩写', 'progress': 0})
+    
+    with state.lock:
+        state.current_stage = 'expand'
+        state.stage_progress = 0
+        state.stage_total = len(articles)
+    
+    if checkpoint:
+        expanded_titles = set(checkpoint.get('expanded_titles', []))
+        articles = [a for a in articles if a.get('title') not in expanded_titles]
+    
+    expanded_articles = []
+    for i, article in enumerate(articles):
+        with state.lock:
+            if state.cancelled:
+                return None, 'cancelled', {'expanded_titles': [a['title'] for a in expanded_articles]}
+            state.stage_progress = i + 1
+            state.current_item = article.get('title', '')[:50]
+        
+        emit_event('log', {'msg': f'✍️ 扩写: {article.get("title", "")[:30]}...', 'stage': 'expand'})
+        emit_event('stage', {'name': 'expand', 'label': '✍️ AI扩写', 'progress': (i+1) / len(articles) * 100})
+        
+        config = load_config()
+        ai_config = config.get('ai', {})
+        expand_style = ai_config.get('expand_style', '技术博客风格')
+        
+        prompt = f"""请基于以下摘要，扩写一篇完整的博客文章（800-1500字）：
+
+标题: {article.get('title', '')}
+摘要: {article.get('ai_summary', article.get('summary', ''))}
+
+要求：
+1. 风格: {expand_style}
+2. 结构清晰，有开头、正文、结尾
+3. 内容有价值，避免空话
+4. 直接输出文章内容，使用 Markdown 格式
+
+开始扩写："""
+        
+        content, err = run_openclaw_stream(prompt, stage='expand', timeout=180)
+        if err:
+            if err == 'cancelled':
+                return None, 'cancelled', {'expanded_titles': [a['title'] for a in expanded_articles]}
+            emit_event('log', {'msg': f'⚠️ 扩写失败: {err}', 'stage': 'expand', 'level': 'warn'})
+            content = f"# {article.get('title', '')}\n\n{article.get('ai_summary', '扩写失败，请重试。')}"
+        
+        article['expanded_content'] = content
+        expanded_articles.append(article)
+        
+        # 保存文章
+        output_dir = Path(__file__).parent / 'output' / 'articles'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = article.get('title', 'untitled').replace('/', '_').replace('\\', '_')[:50]
+        output_file = output_dir / f'{datetime.now().strftime("%Y%m%d_%H%M%S")}_{safe_title}.md'
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        emit_event('item', {'stage': 'expand', 'title': article.get('title', '')[:30], 'file': str(output_file)})
+        emit_event('article', {'title': article.get('title', ''), 'file': str(output_file)})
+    
+    emit_event('log', {'msg': f'✅ 扩写完成: {len(expanded_articles)} 篇', 'stage': 'expand'})
+    return expanded_articles, None, None
+
+def stage_publish(articles, checkpoint=None):
+    """发布阶段"""
+    emit_event('stage', {'name': 'publish', 'label': '📤 发布文章', 'progress': 0})
+    
+    with state.lock:
+        state.current_stage = 'publish'
+        state.stage_progress = 0
+        state.stage_total = len(articles)
+    
+    published_count = 0
+    for i, article in enumerate(articles):
+        with state.lock:
+            if state.cancelled:
+                return published_count, 'cancelled', None
+            state.stage_progress = i + 1
+            state.current_item = article.get('title', '')[:50]
+        
+        emit_event('log', {'msg': f'📤 发布: {article.get("title", "")[:30]}...', 'stage': 'publish'})
+        emit_event('stage', {'name': 'publish', 'label': '📤 发布文章', 'progress': (i+1) / len(articles) * 100})
+        
+        try:
+            run_module('publisher', '--file', article.get('file', ''))
+            published_count += 1
+            emit_event('item', {'stage': 'publish', 'title': article.get('title', '')[:30]})
+        except Exception as e:
+            emit_event('log', {'msg': f'⚠️ 发布失败: {e}', 'stage': 'publish', 'level': 'warn'})
+    
+    emit_event('log', {'msg': f'✅ 发布完成: {published_count} 篇', 'stage': 'publish'})
+    return published_count, None, None
+
+# ============ 流水线控制 ============
+
+def run_pipeline_full(checkpoint=None):
+    """运行完整流水线"""
+    with state.lock:
+        state.running = True
+        state.cancelled = False
+        state.error = None
+        if checkpoint:
+            state.checkpoint = checkpoint
     
     try:
-        response = requests.post(
-            f'{gateway_url}/api/sessions/spawn',
-            json={
-                'task': task,
-                'mode': 'run',  # one-shot
-                'runtime': 'subagent',
-                'timeoutSeconds': 300
-            },
-            timeout=310
-        )
-        return response.json()
+        emit_event('start', {'msg': '🚀 流水线启动', 'checkpoint': checkpoint is not None})
+        
+        # 阶段1: RSS 抓取
+        articles, err, cp = stage_fetch_rss(checkpoint=checkpoint)
+        if err == 'cancelled':
+            with state.lock:
+                state.checkpoint = {'stage': 'fetch', 'data': cp}
+            emit_event('cancelled', {'msg': '⚠️ 流水线已取消', 'checkpoint': state.checkpoint})
+            return
+        if not articles:
+            emit_event('log', {'msg': '⚠️ 未抓取到文章', 'stage': 'fetch'})
+            emit_event('end', {'msg': '流水线结束（无文章）'})
+            return
+        
+        with state.lock:
+            state.progress = 1
+            state.total = 4
+            state.articles = articles
+        
+        # 阶段2: AI 摘要
+        articles, err, cp = stage_summarize(articles, checkpoint=checkpoint)
+        if err == 'cancelled':
+            with state.lock:
+                state.checkpoint = {'stage': 'summarize', 'data': cp}
+            emit_event('cancelled', {'msg': '⚠️ 流水线已取消', 'checkpoint': state.checkpoint})
+            return
+        
+        with state.lock:
+            state.progress = 2
+        
+        # 阶段3: AI 扩写
+        articles, err, cp = stage_expand(articles, checkpoint=checkpoint)
+        if err == 'cancelled':
+            with state.lock:
+                state.checkpoint = {'stage': 'expand', 'data': cp}
+            emit_event('cancelled', {'msg': '⚠️ 流水线已取消', 'checkpoint': state.checkpoint})
+            return
+        
+        with state.lock:
+            state.progress = 3
+            state.articles = articles
+        
+        # 阶段4: 发布
+        published, err, _ = stage_publish(articles, checkpoint=checkpoint)
+        if err == 'cancelled':
+            emit_event('cancelled', {'msg': '⚠️ 流水线已取消'})
+            return
+        
+        with state.lock:
+            state.progress = 4
+        
+        emit_event('complete', {
+            'msg': '🎉 流水线完成!',
+            'articles': len(articles),
+            'published': published
+        })
+        
     except Exception as e:
-        # 如果 OpenClaw 不可用，回退到本地执行
-        return {'error': str(e), 'fallback': True}
-
-
-# ==================== 本地任务执行器 ====================
-
-def fetch_rss_local(max_items: int = 10) -> list:
-    """本地 RSS 抓取（备用方案）"""
-    import feedparser
+        with state.lock:
+            state.error = e
+        emit_event('error', {'msg': f'❌ 错误: {str(e)}'})
     
-    # 读取配置的 RSS 源
-    config_path = BASE_DIR / 'config.yaml'
-    if not config_path.exists():
-        return []
-    
-    import yaml
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-    
-    sources = config.get('rss', {}).get('sources', [])
-    articles = []
-    
-    for source in sources:
-        try:
-            feed = feedparser.parse(source['url'])
-            for entry in feed.entries[:max_items // len(sources)]:
-                articles.append({
-                    'title': entry.get('title', 'No Title'),
-                    'url': entry.get('link', ''),
-                    'source': source.get('name', 'Unknown'),
-                    'summary': entry.get('summary', ''),
-                    'published': entry.get('published', '')
-                })
-        except Exception as e:
-            print(f"Error fetching {source}: {e}")
-    
-    return articles
+    finally:
+        with state.lock:
+            state.running = False
+        emit_event('end', {})
 
-
-def summarize_local(article: dict) -> str:
-    """本地摘要生成（需要配置模型 API）"""
-    # 这里可以调用 OpenAI API 或其他模型
-    # 但按照用户要求，应该尽量用 OpenClaw
-    return article.get('summary', '')[:500]
-
-
-def expand_local(article: dict, summary: str) -> str:
-    """本地扩写（需要配置模型 API）"""
-    # 同样应该用 OpenClaw
-    return f"# {article['title']}\n\n{summary}"
-
-
-# ==================== API 路由 ====================
+# ============ API 路由 ============
 
 @app.route('/')
 def index():
-    """前端页面"""
     return render_template('index.html')
 
-
-@app.route('/api/status')
-def api_status():
-    """系统状态"""
-    config_path = BASE_DIR / 'config.yaml'
-    rss_count = 0
-    
-    if config_path.exists():
-        import yaml
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-        rss_count = len(config.get('rss', {}).get('sources', []))
-    
-    # 统计已生成的文章
-    articles = list(ARTICLES_DIR.glob('*.md'))
-    
-    return jsonify({
-        'status': 'ok',
-        'rss_sources': rss_count,
-        'articles_count': len(articles),
-        'timestamp': datetime.now().isoformat()
-    })
-
-
-@app.route('/api/feeds')
-def api_feeds():
-    """RSS 源列表"""
-    config_path = BASE_DIR / 'config.yaml'
-    if not config_path.exists():
-        return jsonify({'sources': [], 'count': 0})
-    
-    import yaml
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-    
-    sources = config.get('rss', {}).get('sources', [])
-    return jsonify({'sources': sources, 'count': len(sources)})
-
-
-@app.route('/api/articles')
-def api_articles():
-    """获取已生成的文章"""
-    articles = []
-    
-    for path in sorted(ARTICLES_DIR.glob('*.md'), reverse=True)[:20]:
-        try:
-            content = path.read_text(encoding='utf-8')
-            lines = content.split('\n')
-            title = lines[0].replace('#', '').strip() if lines else path.stem
-            preview = '\n'.join(lines[1:5]).strip()
-            
-            articles.append({
-                'title': title,
-                'preview': preview[:200],
-                'date': datetime.fromtimestamp(path.stat().st_mtime).strftime('%Y-%m-%d %H:%M'),
-                'status': '已生成',
-                'path': str(path)
-            })
-        except Exception as e:
-            pass
-    
-    return jsonify({'articles': articles, 'count': len(articles)})
-
-
-@app.route('/api/fetch', methods=['POST'])
-def api_fetch():
-    """抓取 RSS 文章 - 优先使用 OpenClaw"""
-    data = request.get_json() or {}
-    max_items = data.get('max_items', 10)
-    
-    try:
-        # 尝试用 OpenClaw 抓取
-        from modules.local_worker import get_worker
-        worker = get_worker()
-        
-        # 读取 RSS 配置
-        config_path = BASE_DIR / 'config.yaml'
-        if config_path.exists():
-            import yaml
-            with open(config_path) as f:
-                config = yaml.safe_load(f)
-            rss_urls = [s['url'] for s in config.get('rss', {}).get('sources', [])]
-        else:
-            rss_urls = []
-        
-        if rss_urls:
-            # 使用 OpenClaw 抓取第一个源
-            result = worker.fetch_rss(rss_urls[0])
-            if 'articles' in result:
-                articles = result['articles'][:max_items]
-            else:
-                # 回退到本地
-                articles = fetch_rss_local(max_items)
-        else:
-            articles = fetch_rss_local(max_items)
-        
-        # 保存到临时文件供后续处理
-        fetch_file = OUTPUT_DIR / 'fetched.json'
-        with open(fetch_file, 'w', encoding='utf-8') as f:
-            json.dump(articles, f, ensure_ascii=False, indent=2)
-        
-        return jsonify({
-            'success': True,
-            'articles': articles,
-            'count': len(articles),
-            'saved_to': str(fetch_file)
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/summarize', methods=['POST'])
-def api_summarize():
-    """生成摘要 - 调用 OpenClaw"""
-    data = request.get_json() or {}
-    
-    # 读取已抓取的文章
-    fetch_file = OUTPUT_DIR / 'fetched.json'
-    if not fetch_file.exists():
-        return jsonify({'error': 'No articles fetched. Run /api/fetch first.'}), 400
-    
-    with open(fetch_file, encoding='utf-8') as f:
-        articles = json.load(f)
-    
-    summaries = []
-    for article in articles[:5]:  # 限制数量
-        # 这里应该调用 OpenClaw 的 AI 能力
-        summary = summarize_local(article)
-        summaries.append({
-            'title': article['title'],
-            'source': article['source'],
-            'summary': summary
-        })
-    
-    # 保存摘要
-    summary_file = OUTPUT_DIR / 'summaries.json'
-    with open(summary_file, 'w', encoding='utf-8') as f:
-        json.dump(summaries, f, ensure_ascii=False, indent=2)
-    
-    return jsonify({'summaries': summaries, 'count': len(summaries)})
-
-
-@app.route('/api/expand', methods=['POST'])
-def api_expand():
-    """扩写文章 - 使用 OpenClaw AI"""
-    data = request.get_json() or {}
-    
-    # 读取摘要
-    summary_file = OUTPUT_DIR / 'summaries.json'
-    fetch_file = OUTPUT_DIR / 'fetched.json'
-    
-    if not fetch_file.exists():
-        return jsonify({'error': 'No articles. Run /api/fetch first.'}), 400
-    
-    with open(fetch_file, encoding='utf-8') as f:
-        articles = json.load(f)
-    
-    # 尝试使用 OpenClaw
-    try:
-        from modules.local_worker import get_worker
-        worker = get_worker()
-        use_openclaw = True
-    except:
-        use_openclaw = False
-    
-    generated = []
-    for article in articles[:3]:  # 限制数量
-        try:
-            # 生成摘要
-            if use_openclaw:
-                summary_result = worker.summarize_article(
-                    article['title'], 
-                    article.get('summary', '')
-                )
-                summary = summary_result.get('summary', article.get('summary', '')[:500])
-            else:
-                summary = summarize_local(article)
-            
-            # 扩写成完整文章
-            if use_openclaw:
-                expand_result = worker.expand_article(
-                    article['title'],
-                    summary,
-                    article.get('url')
-                )
-                content = expand_result.get('content', expand_local(article, summary))
-            else:
-                content = expand_local(article, summary)
-            
-            # 保存文章
-            safe_title = article['title'][:50].replace('/', '_').replace('\\', '_')
-            article_path = ARTICLES_DIR / f"{safe_title}.md"
-            article_path.write_text(content, encoding='utf-8')
-            
-            generated.append({
-                'title': article['title'],
-                'path': str(article_path)
-            })
-        except Exception as e:
-            print(f"Error processing {article.get('title')}: {e}")
-    
-    return jsonify({
-        'success': True,
-        'articles': generated,
-        'count': len(generated)
-    })
-
-
-@app.route('/api/publish', methods=['POST'])
-def api_publish():
-    """发布文章 - 调用 OpenClaw 发布能力"""
-    data = request.get_json() or {}
-    target = data.get('target', 'all')
-    
-    # 找到未发布的文章
-    articles = list(ARTICLES_DIR.glob('*.md'))
-    published = 0
-    
-    for path in articles[:5]:
-        # 这里应该调用 OpenClaw 的发布能力
-        # 例如发送到微信、博客平台等
-        # 目前只做标记
-        content = path.read_text(encoding='utf-8')
-        if 'published: true' not in content:
-            new_content = f"---\npublished: true\ndate: {datetime.now().isoformat()}\n---\n\n{content}"
-            path.write_text(new_content, encoding='utf-8')
-            published += 1
-    
-    return jsonify({
-        'success': True,
-        'published': published,
-        'message': f'已发布 {published} 篇文章'
-    })
-
+@app.route('/api/stream')
+def api_stream():
+    """SSE 流式事件端点"""
+    return sse_stream()
 
 @app.route('/api/pipeline', methods=['POST'])
 def api_pipeline():
-    """运行完整流水线 - OpenClaw 驱动"""
-    data = request.get_json() or {}
-    max_items = data.get('max_items', 5)
+    """启动完整流水线"""
+    with state.lock:
+        if state.running:
+            return jsonify({'error': '流水线正在运行中'}), 400
+        state.reset()
+        state.running = True
     
-    results = {
-        'started_at': datetime.now().isoformat(),
-        'steps': [],
-        'engine': 'local'  # 标记使用的引擎
-    }
+    # 在后台线程运行
+    thread = threading.Thread(target=run_pipeline_full)
+    thread.daemon = True
+    thread.start()
     
-    try:
-        # 尝试使用 OpenClaw 完整流水线
+    return jsonify({'status': 'started'})
+
+@app.route('/api/resume', methods=['POST'])
+def api_resume():
+    """继续被取消的任务"""
+    with state.lock:
+        if state.running:
+            return jsonify({'error': '流水线正在运行中'}), 400
+        if not state.checkpoint:
+            return jsonify({'error': '没有可继续的检查点'}), 400
+        
+        checkpoint = state.checkpoint
+        state.reset()
+        state.running = True
+    
+    thread = threading.Thread(target=run_pipeline_full, kwargs={'checkpoint': checkpoint})
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'status': 'resumed', 'checkpoint': checkpoint})
+
+@app.route('/api/cancel', methods=['POST'])
+def api_cancel():
+    """取消当前任务"""
+    with state.lock:
+        if not state.running:
+            return jsonify({'error': '没有运行中的任务'}), 400
+        state.cancelled = True
+        
+        # 终止所有进程
+        for stage, proc in state.processes.items():
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                emit_event('log', {'msg': f'🛑 终止进程: {stage}', 'stage': stage})
+            except:
+                pass
+    
+    return jsonify({'status': 'cancelled'})
+
+@app.route('/api/status')
+def api_status():
+    """获取当前状态"""
+    with state.lock:
+        return jsonify(state.to_dict())
+
+@app.route('/api/fetch', methods=['POST'])
+def api_fetch():
+    """单独运行 RSS 抓取"""
+    with state.lock:
+        if state.running:
+            return jsonify({'error': '流水线正在运行中'}), 400
+        state.reset()
+        state.running = True
+    
+    def run():
         try:
-            from modules.local_worker import get_worker
-            worker = get_worker()
-            
-            # 读取 RSS 配置
-            config_path = BASE_DIR / 'config.yaml'
-            if config_path.exists():
-                import yaml
-                with open(config_path) as f:
-                    config = yaml.safe_load(f)
-                rss_urls = [s['url'] for s in config.get('rss', {}).get('sources', [])]
-            else:
-                rss_urls = []
-            
-            if rss_urls:
-                results['engine'] = 'openclaw'
-                results['steps'].append('openclaw_pipeline')
-                
-                # 调用 OpenClaw 完整流水线
-                pipeline_result = worker.run_full_pipeline(rss_urls, max_items)
-                results['openclaw_result'] = pipeline_result
-                
-                # 统计生成的文章
-                if pipeline_result.get('success'):
-                    articles = list(ARTICLES_DIR.glob('*.md'))
-                    results['articles'] = [{'title': a.stem, 'path': str(a)} for a in articles[-max_items:]]
-                    results['published'] = len(articles)
-                
-                results['success'] = pipeline_result.get('success', False)
-                results['completed_at'] = datetime.now().isoformat()
-                return jsonify(results)
-                
+            articles, err, _ = stage_fetch_rss(max_items=request.json.get('max_items', 10))
+            with state.lock:
+                state.articles = articles
+                state.running = False
+            emit_event('complete', {'articles': len(articles) if articles else 0})
+            emit_event('end', {})
         except Exception as e:
-            results['openclaw_error'] = str(e)
-            results['engine'] = 'local_fallback'
-        
-        # 本地回退方案
-        # Step 1: 抓取 RSS
-        results['steps'].append('fetching')
-        fetch_result = api_fetch()
-        fetch_data = fetch_result.get_json()
-        if 'error' in fetch_data:
-            raise Exception(f"Fetch failed: {fetch_data['error']}")
-        results['fetched'] = fetch_data['count']
-        
-        # Step 2: 生成摘要
-        results['steps'].append('summarizing')
-        summary_result = api_summarize()
-        summary_data = summary_result.get_json()
-        if 'error' in summary_data:
-            raise Exception(f"Summarize failed: {summary_data['error']}")
-        results['summarized'] = summary_data['count']
-        
-        # Step 3: 扩写文章
-        results['steps'].append('expanding')
-        expand_result = api_expand()
-        expand_data = expand_result.get_json()
-        if 'error' in expand_data:
-            raise Exception(f"Expand failed: {expand_data['error']}")
-        results['articles'] = expand_data['articles']
-        
-        # Step 4: 发布
-        results['steps'].append('publishing')
-        publish_result = api_publish()
-        publish_data = publish_result.get_json()
-        results['published'] = publish_data.get('published', 0)
-        
-        results['success'] = True
-        results['completed_at'] = datetime.now().isoformat()
-        
-    except Exception as e:
-        results['error'] = str(e)
-        results['success'] = False
+            with state.lock:
+                state.error = e
+                state.running = False
+            emit_event('error', {'msg': str(e)})
+            emit_event('end', {})
     
-    return jsonify(results)
+    thread = threading.Thread(target=run)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'status': 'started'})
 
+@app.route('/api/expand', methods=['POST'])
+def api_expand():
+    """单独运行 AI 扩写"""
+    with state.lock:
+        if state.running:
+            return jsonify({'error': '流水线正在运行中'}), 400
+        
+        # 检查是否有已抓取的文章
+        if not state.articles:
+            # 尝试从文件加载
+            raw_dir = Path(__file__).parent / 'output' / 'raw'
+            if raw_dir.exists():
+                files = sorted(raw_dir.glob('*.json'), reverse=True)
+                if files:
+                    with open(files[0], 'r', encoding='utf-8') as f:
+                        state.articles = json.load(f)
+        
+        if not state.articles:
+            return jsonify({'error': '没有可扩写的文章，请先抓取 RSS'}), 400
+        
+        state.reset()
+        state.running = True
+    
+    def run():
+        try:
+            articles, err, _ = stage_summarize(state.articles)
+            if not err:
+                articles, err, _ = stage_expand(articles)
+            with state.lock:
+                state.articles = articles
+                state.running = False
+            emit_event('complete', {'articles': len(articles) if articles else 0})
+            emit_event('end', {})
+        except Exception as e:
+            with state.lock:
+                state.error = e
+                state.running = False
+            emit_event('error', {'msg': str(e)})
+            emit_event('end', {})
+    
+    thread = threading.Thread(target=run)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'status': 'started'})
 
-# ==================== 入口 ====================
+@app.route('/api/publish', methods=['POST'])
+def api_publish():
+    """单独运行发布"""
+    with state.lock:
+        if state.running:
+            return jsonify({'error': '流水线正在运行中'}), 400
+        state.running = True
+    
+    def run():
+        try:
+            articles_dir = Path(__file__).parent / 'output' / 'articles'
+            articles = [{'title': f.stem, 'file': str(f)} for f in articles_dir.glob('*.md')]
+            published, _, _ = stage_publish(articles)
+            with state.lock:
+                state.running = False
+            emit_event('complete', {'published': published})
+            emit_event('end', {})
+        except Exception as e:
+            with state.lock:
+                state.error = e
+                state.running = False
+            emit_event('error', {'msg': str(e)})
+            emit_event('end', {})
+    
+    thread = threading.Thread(target=run)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'status': 'started'})
+
+@app.route('/api/articles')
+def api_articles():
+    """获取已生成的文章列表"""
+    articles_dir = Path(__file__).parent / 'output' / 'articles'
+    articles = []
+    if articles_dir.exists():
+        for f in sorted(articles_dir.glob('*.md'), reverse=True)[:20]:
+            content = f.read_text(encoding='utf-8')
+            title = content.split('\n')[0].replace('#', '').strip() or f.stem
+            preview = content[:200].replace('\n', ' ')
+            articles.append({
+                'title': title,
+                'file': str(f),
+                'preview': preview,
+                'date': datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M'),
+                'status': '草稿'
+            })
+    return jsonify({'articles': articles})
 
 if __name__ == '__main__':
-    print("🚀 博客流水线启动中...")
-    print("📝 OpenClaw 驱动的全自动内容生成系统")
-    print("🌐 访问: http://localhost:5000")
-    
-    app.run(
-        host='0.0.0.0',
-        port=5000,
-        debug=False
-    )
+    app.run(host='0.0.0.0', port=5001, debug=True, threaded=True)
