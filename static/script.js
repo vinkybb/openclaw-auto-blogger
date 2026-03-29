@@ -8,7 +8,9 @@ const state = {
     selectedSources: new Set(),
     articles: [],
     isRunning: false,
-    currentStage: 0
+    currentStage: 0,
+    lastSources: [],  // 上次运行参数，用于恢复
+    lastTopic: ''
 };
 
 // 阶段定义
@@ -171,6 +173,10 @@ async function startPipeline() {
     const customTopic = document.getElementById('customTopic').value.trim();
     const articleCount = parseInt(document.getElementById('articleCount').value) || 3;
     
+    // 保存参数以便恢复
+    state.lastSources = selectedSources;
+    state.lastTopic = customTopic;
+    
     state.isRunning = true;
     updateStatus('运行中...', true);
     
@@ -306,16 +312,69 @@ function resetPipelineState() {
         </svg>
         <span>启动流水线</span>
     `;
+    
+    // 重置取消按钮
+    const cancelBtn = document.getElementById('cancelBtn');
+    if (cancelBtn) {
+        cancelBtn.className = 'btn btn-sm btn-danger';
+        cancelBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            </svg>
+            取消
+        `;
+        cancelBtn.onclick = () => cancelPipeline();
+    }
 }
 
 function cancelPipeline() {
     state.isRunning = false;
     updateStatus('已取消', false);
+    
+    // 重置所有阶段状态
+    STAGES.forEach(stage => updateStage(stage.id, 'pending'));
+    
+    // 清空日志，保留取消日志
+    const logContainer = document.getElementById('logContainer');
+    logContainer.innerHTML = '';
     addLog('用户取消了流水线', 'warning');
-    resetPipelineState();
+    
+    // 取消按钮变成恢复流水线按钮
+    const cancelBtn = document.getElementById('cancelBtn');
+    if (cancelBtn) {
+        cancelBtn.className = 'btn btn-sm btn-warning';
+        cancelBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+            </svg>
+            恢复流水线
+        `;
+        cancelBtn.onclick = () => resumePipeline();
+    }
+    
+    // 重置启动按钮为可用状态
+    const startBtn = document.getElementById('startBtn');
+    startBtn.disabled = false;
+    startBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        <span>启动流水线</span>
+    `;
     
     fetch(`${API_BASE}/api/cancel`, { method: 'POST' })
         .catch(console.error);
+}
+
+function resumePipeline() {
+    // 使用上次保存的参数重新启动
+    if (state.lastSources && state.lastSources.length > 0) {
+        startPipeline(state.lastSources, state.lastTopic);
+    } else {
+        showToast('没有可恢复的流水线', 'warning');
+        resetPipelineState();
+    }
 }
 
 // ============================================
