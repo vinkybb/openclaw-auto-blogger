@@ -71,6 +71,7 @@ html {
     font-size: 16px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
 }
 
 body {
@@ -80,6 +81,7 @@ body {
     line-height: 1.6;
     min-height: 100vh;
     overflow-x: hidden;
+    touch-action: manipulation;
 }
 
 /* 背景装饰 */
