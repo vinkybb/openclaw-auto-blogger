@@ -377,3 +377,41 @@ class DirectSpawnClient:
 def create_client(config: Dict[str, Any] = None) -> OpenClawClient:
     """创建 OpenClaw 客户端实例"""
     return OpenClawClient(config)
+
+
+def call_openclaw(messages: list, task_type: str = 'chat', model: str = None, 
+                  timeout_seconds: int = 120) -> Dict[str, Any]:
+    """
+    便捷函数：直接调用 OpenClaw 执行聊天/处理任务
+    
+    Args:
+        messages: 消息列表，格式 [{"role": "user", "content": "..."}]
+        task_type: 任务类型 (chat/summarize/expand)
+        model: 使用的模型 (可选)
+        timeout_seconds: 超时时间
+        
+    Returns:
+        包含 success, output/error 的字典
+    """
+    client = OpenClawClient()
+    
+    # 将 messages 转换为 task 字符串
+    if messages and len(messages) > 0:
+        # 取最后一条用户消息作为任务
+        task_content = messages[-1].get('content', '') if isinstance(messages[-1], dict) else str(messages[-1])
+        
+        # 如果有多轮对话，构建上下文
+        if len(messages) > 1:
+            context_parts = []
+            for msg in messages[:-1]:
+                role = msg.get('role', 'user') if isinstance(msg, dict) else 'user'
+                content = msg.get('content', '') if isinstance(msg, dict) else str(msg)
+                context_parts.append(f"[{role}]: {content}")
+            context = "\n".join(context_parts)
+            task = f"上下文:\n{context}\n\n请处理: {task_content}"
+        else:
+            task = task_content
+    else:
+        return {'success': False, 'error': '消息列表为空', 'output': ''}
+    
+    return client.spawn_agent(task, model=model, timeout_seconds=timeout_seconds)
