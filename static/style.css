@@ -207,8 +207,9 @@ body {
 }
 
 .nav-item.active {
-    background: var(--accent-glow);
+    background: rgba(129, 140, 248, 0.25);
     color: var(--accent-primary);
+    box-shadow: inset 3px 0 0 var(--accent-primary);
 }
 
 .nav-item.active::before {
@@ -365,8 +366,9 @@ body {
 }
 
 .source-card.selected {
-    background: var(--accent-glow);
+    background: rgba(129, 140, 248, 0.25);
     border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary), 0 4px 12px rgba(129, 140, 248, 0.2);
 }
 
 .source-card input[type="checkbox"] {
