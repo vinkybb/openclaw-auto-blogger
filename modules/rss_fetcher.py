@@ -2,16 +2,16 @@
 RSS订阅获取模块
 """
 
+import time
+import hashlib
 import feedparser
 from datetime import datetime
 from typing import List, Dict
-import hashlib
 
 
 class RSSFetcher:
     def __init__(self, config: dict):
         self.sources = config.get('sources', [])
-        self.fetch_interval = config.get('fetch_interval', 3600)
     
     def fetch_feed(self, url: str, name: str = "") -> List[Dict]:
         """抓取单个RSS源"""
@@ -31,8 +31,13 @@ class RSSFetcher:
                 
                 # 解析日期
                 published = entry.get('published_parsed') or entry.get('updated_parsed')
-                if published:
-                    pub_date = datetime(*published[:6]).isoformat()
+                if published and hasattr(published, '__len__') and len(published) >= 6:
+                    try:
+                        pub_date = datetime.fromtimestamp(
+                            time.mktime(published)
+                        ).isoformat()
+                    except (TypeError, ValueError, OSError):
+                        pub_date = datetime.now().isoformat()
                 else:
                     pub_date = datetime.now().isoformat()
                 

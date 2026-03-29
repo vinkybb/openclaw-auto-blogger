@@ -48,15 +48,38 @@ class RSSSummarizer:
 请直接输出摘要内容。"""
 
         try:
-            summary = self.client.spawn_agent(prompt, timeout_seconds=60)
-            text = self.client._extract_result(summary)
-            
+            raw = self.client.spawn_agent(
+                prompt,
+                timeout_seconds=self.client.timeout,
+                min_chars_early_exit=80,
+            )
+            if isinstance(raw, dict) and raw.get("success") is False:
+                err = raw.get("error") or "OpenClaw 调用失败"
+                return {
+                    "title": title,
+                    "summary": "",
+                    "word_count": 0,
+                    "style": style,
+                    "success": False,
+                    "error": err,
+                }
+            text = self.client._extract_result(raw)
+            if text.startswith("错误:"):
+                return {
+                    "title": title,
+                    "summary": "",
+                    "word_count": 0,
+                    "style": style,
+                    "success": False,
+                    "error": text,
+                }
+
             return {
                 "title": title,
                 "summary": text,
                 "word_count": len(text),
                 "style": style,
-                "success": True
+                "success": True,
             }
         except Exception as e:
             return {
@@ -109,13 +132,19 @@ class RSSSummarizer:
 只输出要点列表，每行一个要点，不要编号。"""
 
         try:
-            result = self.client.spawn_agent(prompt, timeout_seconds=30)
-            text = self.client._extract_result(result)
-            
-            # 解析要点列表
-            points = [p.strip() for p in text.split('\n') if p.strip()]
+            raw = self.client.spawn_agent(
+                prompt,
+                timeout_seconds=self.client.timeout,
+                min_chars_early_exit=50,
+            )
+            if isinstance(raw, dict) and raw.get("success") is False:
+                return [f"提取失败: {raw.get('error', 'unknown')}"]
+            text = self.client._extract_result(raw)
+            if text.startswith("错误:"):
+                return [text]
+            points = [p.strip() for p in text.split("\n") if p.strip()]
             return points[:7]
-            
+
         except Exception as e:
             return [f"提取失败: {str(e)}"]
 

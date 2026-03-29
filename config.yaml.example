@@ -1,10 +1,16 @@
-# 博客流水线示例配置
-# 复制此文件为 config.yaml 并填入你的配置
+# =============================================================================
+# 博客流水线示例配置 — 复制为 config.yaml 后按需填写
+# =============================================================================
+#
+# 运行：python app.py
+# 需要：运行中的 OpenClaw Gateway + 环境变量 OPENCLAW_GATEWAY_TOKEN
+# 摘要/扩写：Gateway tools/invoke → sessions_spawn
+# 文档: https://docs.openclaw.ai/gateway/tools-invoke-http-api
+#
+# =============================================================================
 
-# RSS源配置
 rss:
   sources:
-    # 示例 RSS 源
     - name: "奇客Solidot"
       url: "https://www.solidot.org/index.rss"
       enabled: true
@@ -14,68 +20,37 @@ rss:
     - name: "少数派"
       url: "https://sspai.com/feed"
       enabled: false
-  # 抓取间隔 (秒)
-  fetch_interval: 3600
 
-# OpenClaw 配置
-# 用于 AI 内容生成 (摘要、扩写)
 openclaw:
-  # OpenClaw Gateway URL
-  # 如果在同一台机器上运行，使用 localhost
-  base_url: "http://localhost:3000"
-  # 请求超时时间 (秒)
+  gateway_url: "http://127.0.0.1:18789"
+  gateway_token: null
+  base_url: "http://127.0.0.1:18789"
   timeout: 300
-  # 指定模型 (可选，留空使用系统默认)
   model: null
 
-# 内容生成设置
 content:
-  # 摘要长度
   summary_length: 200
-  # 文章目标字数
   article_length: 1500
-  # 输出语言
   language: "zh-CN"
-  # 是否在文末包含原文链接
   include_source: true
-  # 写作风格
   style: "深度分析"
 
-# 配图生成 (可选)
-image:
-  enabled: false
-  # 提供商: unsplash / placeholder / none
-  provider: "unsplash"
-  # Unsplash 访问密钥 (可选，不填使用公开 API)
-  access_key: null
-
-# 发布设置
 publish:
-  # 本地文件输出
   local:
     enabled: true
-    # 输出目录
     content_dir: "./output/posts"
-  
-  # GitHub Pages 发布
+
   github:
     enabled: false
     repo: "your-username/your-blog"
     branch: "main"
-    # GitHub Personal Access Token
     token: null
     commit_message: "Auto publish: {title}"
-  
-  # WordPress 发布
+
+  # WordPress REST API：使用「应用密码」基本认证
+  # url 可为站点根 https://your-blog.com、或 .../wp-json、或旧版 xmlrpc.php（将自动换为 REST）
   wordpress:
     enabled: false
-    url: "https://your-blog.com/xmlrpc.php"
+    url: "https://your-blog.com"
     username: null
     password: null
-
-# 定时任务设置
-scheduler:
-  enabled: false
-  # 运行时间表 (cron 格式)
-  schedule: "0 8,20 * * *"  # 每天 8:00 和 20:00 运行
-  timezone: "Asia/Shanghai"
