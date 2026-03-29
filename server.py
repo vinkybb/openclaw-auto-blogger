@@ -457,9 +457,32 @@ def fetch_article_content(url, timeout=10):
     return None
 
 def search_background_info(query, max_results=3):
-    """搜索背景信息 - 通过 OpenClaw web_search 工具"""
-    # 网络搜索在当前环境受限，暂时跳过
-    # 如果需要，可以通过 OpenClaw subagent 执行
+    """搜索背景信息 - 通过 OpenClaw bb-browser"""
+    try:
+        # 使用 bb-browser site 进行搜索（支持 Google/Baidu/Bing）
+        cmd = ['bb-browser', 'site', 'google/search', query, '--openclaw', '--json']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            # 尝试百度搜索作为备选
+            cmd = ['bb-browser', 'site', 'baidu/search', query, '--openclaw', '--json']
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0 and result.stdout:
+            data = json.loads(result.stdout)
+            # 提取搜索结果的摘要信息
+            results = data.get('results', data.get('items', []))[:max_results]
+            if results:
+                summaries = []
+                for r in results:
+                    title = r.get('title', '')
+                    snippet = r.get('snippet', r.get('summary', ''))
+                    if snippet:
+                        summaries.append(f"{title}: {snippet}")
+                return "\n".join(summaries)
+    except Exception as e:
+        emit_event('log', {'msg': f'⚠️ 搜索失败: {str(e)[:30]}', 'stage': 'expand', 'level': 'warn'})
+    
     return None
 
 def process_single_expand(article, index, total, expand_style):
@@ -484,14 +507,25 @@ def process_single_expand(article, index, total, expand_style):
         else:
             emit_event('log', {'msg': f'⚠️ 原文获取失败，将只使用摘要', 'stage': 'expand', 'level': 'warn'})
     
-    # 2. 构建扩写 prompt
+    # 2. 搜索背景信息（通过 bb-browser）
     title = article.get('title', '')
+    background_info = None
+    if title:
+        emit_event('log', {'msg': f'🔍 搜索背景: {title[:30]}...', 'stage': 'expand'})
+        background_info = search_background_info(title, max_results=3)
+        if background_info:
+            emit_event('log', {'msg': f'✅ 搜索成功，补充背景信息', 'stage': 'expand'})
+    
+    # 3. 构建扩写 prompt
     context_parts = []
     context_parts.append(f"标题: {title}")
     context_parts.append(f"摘要: {article.get('ai_summary', article.get('summary', ''))}")
     
     if original_content:
         context_parts.append(f"\n原文内容（参考）:\n{original_content[:2000]}")
+    
+    if background_info:
+        context_parts.append(f"\n网络搜索背景信息:\n{background_info}")
     
     context = "\n".join(context_parts)
     
