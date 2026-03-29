@@ -78,7 +78,14 @@ async function loadRssSources() {
         const data = await response.json();
         
         state.sources = data.sources || [];
+        
+        // 默认选中 enabled 的源
         state.selectedSources = new Set();
+        state.sources.forEach((source, index) => {
+            if (source.enabled) {
+                state.selectedSources.add(index);
+            }
+        });
         
         renderSources();
         updateSourceCount();
@@ -97,20 +104,66 @@ function renderSources() {
         return;
     }
     
-    grid.innerHTML = state.sources.map((source, index) => `
-        <div class="source-card ${state.selectedSources.has(index) ? 'selected' : ''}" data-index="${index}">
-            <input type="checkbox" id="source-${index}" ${state.selectedSources.has(index) ? 'checked' : ''}>
-            <div class="source-checkbox" onclick="toggleSource(${index}); event.stopPropagation();" ontouchend="toggleSource(${index}); event.stopPropagation(); event.preventDefault();">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <polyline points="20 6 9 17 4 12"/>
-                </svg>
-            </div>
-            <div class="source-info">
-                <div class="source-name">${escapeHtml(source.name || source)}</div>
-                <div class="source-meta">${source.url ? new URL(source.url).hostname : 'RSS源'}</div>
-            </div>
-        </div>
-    `).join('');
+    // 按分类分组
+    const categories = {
+        'tech': { name: '科技', icon: '💻', items: [] },
+        'ai': { name: 'AI/ML', icon: '🤖', items: [] },
+        'dev': { name: '开发者', icon: '👨‍💻', items: [] },
+        'product': { name: '产品/创业', icon: '💡', items: [] },
+        'design': { name: '设计', icon: '🎨', items: [] },
+        'business': { name: '商业', icon: '📊', items: [] },
+        'science': { name: '科学', icon: '🔬', items: [] },
+        'blog': { name: '优质博客', icon: '📝', items: [] },
+        'other': { name: '其他', icon: '📦', items: [] }
+    };
+    
+    // 只显示启用的源
+    state.sources.filter(s => s.enabled).forEach((source) => {
+        const index = state.sources.indexOf(source);
+        const cat = source.category || 'other';
+        if (categories[cat]) {
+            categories[cat].items.push({ source, index });
+        } else {
+            categories['other'].items.push({ source, index });
+        }
+    });
+    
+    // 渲染分类
+    let html = '';
+    Object.entries(categories).forEach(([catId, cat]) => {
+        if (cat.items.length > 0) {
+            html += `
+                <div class="source-category">
+                    <div class="category-header">
+                        <span class="category-icon">${cat.icon}</span>
+                        <span class="category-name">${cat.name}</span>
+                        <span class="category-count">${cat.items.length}</span>
+                        <button class="category-toggle" onclick="toggleCategory('${catId}')">
+                            全选
+                        </button>
+                    </div>
+                    <div class="category-items">
+                        ${cat.items.map(({source, index}) => `
+                            <div class="source-card ${state.selectedSources.has(index) ? 'selected' : ''}" data-index="${index}" data-category="${catId}">
+                                <input type="checkbox" id="source-${index}" ${state.selectedSources.has(index) ? 'checked' : ''}>
+                                <div class="source-checkbox" onclick="toggleSource(${index}); event.stopPropagation();" ontouchend="toggleSource(${index}); event.stopPropagation(); event.preventDefault();">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                </div>
+                                <div class="source-info">
+                                    <div class="source-name">${escapeHtml(source.name || source)}</div>
+                                    <div class="source-meta">${source.url ? new URL(source.url).hostname : 'RSS源'}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    grid.innerHTML = html;
 }
 
 function toggleSource(index) {
@@ -122,6 +175,35 @@ function toggleSource(index) {
         state.selectedSources.add(index);
         card.classList.add('selected');
     }
+    updateSourceCount();
+}
+
+function toggleCategory(categoryId) {
+    // 找到该分类下的所有源
+    const cards = document.querySelectorAll(`[data-category="${categoryId}"]`);
+    const indices = Array.from(cards).map(c => parseInt(c.dataset.index));
+    
+    // 检查是否全选了
+    const allSelected = indices.every(i => state.selectedSources.has(i));
+    
+    // 如果全选了，取消全选；否则全选
+    indices.forEach(index => {
+        const card = document.querySelector(`[data-index="${index}"]`);
+        if (allSelected) {
+            state.selectedSources.delete(index);
+            card.classList.remove('selected');
+        } else {
+            state.selectedSources.add(index);
+            card.classList.add('selected');
+        }
+    });
+    
+    // 更新按钮文字
+    const btn = document.querySelector(`.source-category [onclick="toggleCategory('${categoryId}')"]`);
+    if (btn) {
+        btn.textContent = allSelected ? '全选' : '取消';
+    }
+    
     updateSourceCount();
 }
 
@@ -190,6 +272,20 @@ async function startPipeline() {
     startBtn.disabled = true;
     startBtn.innerHTML = `<svg class="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.3"/><path d="M12 2a10 10 0 0110 10"/></svg><span>运行中...</span>`;
     
+    // 更新取消按钮为暂停按钮
+    const cancelBtn = document.getElementById('cancelBtn');
+    if (cancelBtn) {
+        cancelBtn.className = 'btn btn-sm btn-warning';
+        cancelBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="4" width="4" height="16"/>
+                <rect x="14" y="4" width="4" height="16"/>
+            </svg>
+            暂停
+        `;
+        cancelBtn.onclick = () => pausePipeline();
+    }
+    
     try {
         const response = await fetch(`${API_BASE}/api/pipeline`, {
             method: 'POST',
@@ -255,6 +351,8 @@ async function pollPipelineStatus() {
     let lastLogIndex = 0; // 记录上次看到的日志位置
     
     const poll = async () => {
+        // 暂停时不轮询，但保留状态以便恢复后继续
+        if (state.isPaused) return;
         if (!state.isRunning) return;
         
         try {
@@ -288,6 +386,10 @@ async function pollPipelineStatus() {
             } else if (data.status === 'error') {
                 showToast(`执行失败: ${data.error}`, 'error');
                 resetPipelineState();
+            } else if (data.paused) {
+                // 服务端暂停状态同步
+                state.isPaused = true;
+                updateStatus('已暂停', true);
             } else {
                 setTimeout(poll, 1000); // 缩短轮询间隔到1秒
             }
@@ -367,13 +469,73 @@ function cancelPipeline() {
         .catch(console.error);
 }
 
-function resumePipeline() {
-    // 使用上次保存的参数重新启动
-    if (state.lastSources && state.lastSources.length > 0) {
-        startPipeline(state.lastSources, state.lastTopic);
-    } else {
-        showToast('没有可恢复的流水线', 'warning');
-        resetPipelineState();
+async function pausePipeline() {
+    try {
+        const response = await fetch(`${API_BASE}/api/pause`, { method: 'POST' });
+        const result = await response.json();
+        
+        if (result.status === 'paused') {
+            state.isPaused = true;
+            updateStatus('已暂停', true);
+            addLog('用户暂停了流水线', 'warning');
+            
+            // 暂停按钮变成恢复按钮
+            const cancelBtn = document.getElementById('cancelBtn');
+            if (cancelBtn) {
+                cancelBtn.className = 'btn btn-sm btn-success';
+                cancelBtn.innerHTML = `
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/>
+                        <path d="M3 3v5h5"/>
+                    </svg>
+                    继续
+                `;
+                cancelBtn.onclick = () => resumePipeline();
+            }
+            
+            showToast('流水线已暂停', 'warning');
+        } else {
+            showToast(`暂停失败: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('暂停失败:', error);
+        showToast(`暂停失败: ${error.message}`, 'error');
+    }
+}
+
+async function resumePipeline() {
+    try {
+        const response = await fetch(`${API_BASE}/api/resume`, { method: 'POST' });
+        const result = await response.json();
+        
+        if (result.status === 'resumed') {
+            state.isPaused = false;
+            state.isRunning = true;
+            updateStatus('运行中', true);
+            addLog('流水线继续执行', 'info');
+            
+            // 恢复按钮变成暂停按钮
+            const cancelBtn = document.getElementById('cancelBtn');
+            if (cancelBtn) {
+                cancelBtn.className = 'btn btn-sm btn-warning';
+                cancelBtn.innerHTML = `
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="6" y="4" width="4" height="16"/>
+                        <rect x="14" y="4" width="4" height="16"/>
+                    </svg>
+                    暂停
+                `;
+                cancelBtn.onclick = () => pausePipeline();
+            }
+            
+            showToast('流水线继续执行', 'success');
+            pollPipelineStatus();
+        } else {
+            showToast(`恢复失败: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('恢复失败:', error);
+        showToast(`恢复失败: ${error.message}`, 'error');
     }
 }
 

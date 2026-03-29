@@ -78,10 +78,11 @@ def emit_event(event_type, data):
     event_queue.put(event)
     # 同时更新 state.logs
     if event_type in ['log', 'error']:
+        log_type = data.get('type', 'info') if event_type == 'log' else 'error'
         with state.lock:
             state.logs.append({
                 'time': datetime.now().strftime('%H:%M:%S'),
-                'type': event_type,
+                'type': log_type,
                 'msg': data.get('msg', '')
             })
 
@@ -163,9 +164,23 @@ def call_llm_api(prompt, timeout=120):
     except Exception as e:
         return None, str(e)
 
+def wait_if_paused():
+    """如果暂停，等待恢复"""
+    while True:
+        with state.lock:
+            if state.cancelled:
+                return False  # 被取消，终止
+            if not state.paused:
+                return True   # 继续执行
+        time.sleep(0.5)  # 每 0.5 秒检查一次
+
 def run_openclaw_stream(prompt, stage='unknown', timeout=120):
     """调用 LLM API 并返回结果"""
-    emit_event('log', {'msg': f'🤖 调用 AI ({stage})...', 'stage': stage})
+    # 检查暂停/取消
+    if not wait_if_paused():
+        return None, "cancelled"
+    
+    emit_event('log', {'msg': f'🤖 调用 AI ({stage})...', 'stage': stage, 'type': 'info'})
     
     # 检查取消
     with state.lock:
@@ -175,23 +190,17 @@ def run_openclaw_stream(prompt, stage='unknown', timeout=120):
     result, error = call_llm_api(prompt, timeout)
     
     if error:
-        emit_event('log', {'msg': f'❌ AI调用失败 ({stage}): {error}', 'stage': stage})
+        emit_event('log', {'msg': f'❌ AI调用失败 ({stage}): {error}', 'stage': stage, 'type': 'error'})
         return None, error
     
-    # 流式推送结果（按行）
-    lines = result.strip().split('\n')
-    for line in lines:
-        emit_event('stream', {
-            'stage': stage,
-            'line': line,
-            'partial': True
-        })
+    # 发送完成日志，包含结果摘要
+    result_preview = result[:200] + '...' if len(result) > 200 else result
+    emit_event('log', {'msg': f'✅ AI调用完成 ({stage})', 'stage': stage, 'type': 'success'})
     
-    emit_event('stream', {
-        'stage': stage,
-        'line': result,
-        'partial': False
-    })
+    # 如果是扩写或摘要，发送内容预览
+    if stage in ['expand', 'summarize'] and result:
+        word_count = len(result)
+        emit_event('log', {'msg': f'📝 生成了 {word_count} 字内容', 'stage': stage, 'type': 'info'})
     
     return result, None
 
@@ -211,11 +220,48 @@ def run_module(module_name, *args):
 
 # 前端checkbox值 -> config.yaml中的源名称/URL映射
 SOURCE_ALIAS_MAP = {
-    'techcrunch': ['TechCrunch', 'techcrunch.com'],
+    # 科技
     'hackernews': ['Hacker News', 'hnrss.org'],
-    'openai': ['OpenAI', 'openai.com'],
-    'baoyu': ['宝玉', 'baoyu'],
     'ruanyifeng': ['阮一峰', 'ruanyifeng'],
+    'techcrunch': ['TechCrunch', 'techcrunch.com'],
+    'theverge': ['The Verge', 'theverge.com'],
+    'wired': ['Wired', 'wired.com'],
+    'ars': ['Ars Technica', 'arstechnica.com'],
+    'infoq': ['InfoQ', 'infoq.cn'],
+    '36kr': ['36氪', '36kr.com'],
+    # AI
+    'openai': ['OpenAI', 'openai.com'],
+    'googleai': ['Google AI', 'blog.google'],
+    'msai': ['Microsoft AI', 'blogs.microsoft.com'],
+    'mlmastery': ['Machine Learning Mastery', 'machinelearningmastery.com'],
+    # 开发者
+    'github': ['GitHub', 'github.blog'],
+    'docker': ['Docker', 'docker.com'],
+    'kubernetes': ['Kubernetes', 'kubernetes.io'],
+    'nodejs': ['Node.js', 'nodejs.org'],
+    'python': ['Python', 'pythoninsider.blogspot.com'],
+    'rust': ['Rust', 'rust-lang.org'],
+    # 产品/创业
+    'producthunt': ['Product Hunt', 'producthunt.com'],
+    'indiehackers': ['Indie Hackers', 'indiehackers.com'],
+    'paulgraham': ['Paul Graham', 'aaronsw.com'],
+    # 设计
+    'dribbble': ['Dribbble', 'dribbble.com'],
+    'behance': ['Behance', 'behance.net'],
+    'smashing': ['Smashing Magazine', 'smashingmagazine.com'],
+    # 商业
+    'hbr': ['Harvard Business Review', 'hbr.org'],
+    'mittech': ['MIT Technology Review', 'technologyreview.com'],
+    'economist': ['经济学人', 'economist.com'],
+    # 科学
+    'nature': ['Nature', 'nature.com'],
+    'sciencedaily': ['Science Daily', 'sciencedaily.com'],
+    'nasa': ['NASA', 'nasa.gov'],
+    # 中文博客
+    'meituan': ['美团技术', 'tech.meituan.com'],
+    'bytes': ['字节跳动', 'bytes.alibaba.com'],
+    'aliyun': ['阿里云', 'developer.aliyun.com'],
+    'coolshell': ['CoolShell', 'coolshell.cn'],
 }
 
 def normalize_source_selection(selected):
@@ -625,12 +671,32 @@ def api_pipeline():
     
     return jsonify({'status': 'started', 'sources': len(sources), 'topics': len(topics)})
 
+@app.route('/api/pause', methods=['POST'])
+def api_pause():
+    """暂停当前任务"""
+    with state.lock:
+        if not state.running:
+            return jsonify({'error': '没有运行中的任务'}), 400
+        if state.paused:
+            return jsonify({'error': '任务已经暂停'}), 400
+        state.paused = True
+        emit_event('log', {'msg': '⏸️ 流水线已暂停', 'type': 'warning'})
+    
+    return jsonify({'status': 'paused'})
+
 @app.route('/api/resume', methods=['POST'])
 def api_resume():
-    """继续被取消的任务"""
+    """继续被暂停的任务"""
     with state.lock:
-        if state.running:
+        if state.running and not state.paused:
             return jsonify({'error': '流水线正在运行中'}), 400
+        if state.paused:
+            # 从暂停恢复
+            state.paused = False
+            emit_event('log', {'msg': '▶️ 流水线继续执行', 'type': 'info'})
+            return jsonify({'status': 'resumed'})
+        
+        # 从取消恢复（使用检查点）
         if not state.checkpoint:
             return jsonify({'error': '没有可继续的检查点'}), 400
         
@@ -1085,7 +1151,15 @@ def api_ai_modify_text(filename):
         
         # 调用AI
         from modules.openclaw_client import call_openclaw
-        response = call_openclaw(messages, task_type='chat')
+        result = call_openclaw(messages, task_type='chat')
+        
+        # 检查返回结果
+        if not isinstance(result, dict) or not result.get('success'):
+            error_msg = result.get('error', 'AI调用失败') if isinstance(result, dict) else 'AI返回格式错误'
+            return jsonify({'error': error_msg}), 500
+        
+        # 提取响应文本
+        response = result.get('output') or result.get('result') or ''
         
         # 清理响应中的markdown格式标记
         new_text = response.strip()
