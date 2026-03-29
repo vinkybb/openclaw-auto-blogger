@@ -428,6 +428,40 @@ def stage_summarize(articles, checkpoint=None):
     emit_event('log', {'msg': f'✅ 摘要完成: {len(summarized)} 篇（并行 {parallel_workers} 线程）', 'stage': 'summarize'})
     return summarized, None, None
 
+def fetch_article_content(url, timeout=10):
+    """获取文章原文内容"""
+    if not url:
+        return None
+    
+    import requests
+    import urllib3
+    urllib3.disable_warnings()
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
+        if resp.status_code == 200:
+            # 简单提取文本内容
+            text = resp.text
+            # 去除 HTML 标签（简单处理）
+            import re
+            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL|re.IGNORECASE)
+            text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL|re.IGNORECASE)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            # 返回前 3000 字
+            return text[:3000] if len(text) > 3000 else text
+    except Exception as e:
+        pass
+    return None
+
+def search_background_info(query, max_results=3):
+    """搜索背景信息 - 通过 OpenClaw web_search 工具"""
+    # 网络搜索在当前环境受限，暂时跳过
+    # 如果需要，可以通过 OpenClaw subagent 执行
+    return None
+
 def process_single_expand(article, index, total, expand_style):
     """处理单篇文章的扩写（用于并行）"""
     with state.lock:
@@ -439,16 +473,38 @@ def process_single_expand(article, index, total, expand_style):
     emit_event('log', {'msg': f'✍️ 扩写: {article.get("title", "")[:30]}...', 'stage': 'expand'})
     emit_event('stage', {'name': 'expand', 'label': '✍️ AI扩写', 'progress': (index+1) / total * 100})
     
-    prompt = f"""请基于以下摘要，扩写一篇完整的博客文章（800-1500字）：
+    # 1. 获取原文完整内容
+    original_url = article.get('link', '')
+    original_content = None
+    if original_url:
+        emit_event('log', {'msg': f'📄 获取原文: {original_url[:50]}...', 'stage': 'expand'})
+        original_content = fetch_article_content(original_url)
+        if original_content:
+            emit_event('log', {'msg': f'✅ 原文获取成功 ({len(original_content)}字)', 'stage': 'expand'})
+        else:
+            emit_event('log', {'msg': f'⚠️ 原文获取失败，将只使用摘要', 'stage': 'expand', 'level': 'warn'})
+    
+    # 2. 构建扩写 prompt
+    title = article.get('title', '')
+    context_parts = []
+    context_parts.append(f"标题: {title}")
+    context_parts.append(f"摘要: {article.get('ai_summary', article.get('summary', ''))}")
+    
+    if original_content:
+        context_parts.append(f"\n原文内容（参考）:\n{original_content[:2000]}")
+    
+    context = "\n".join(context_parts)
+    
+    prompt = f"""请基于以下信息，扩写一篇完整的博客文章（800-1500字）：
 
-标题: {article.get('title', '')}
-摘要: {article.get('ai_summary', article.get('summary', ''))}
+{context}
 
 要求：
 1. 风格: {expand_style}
 2. 结构清晰，有开头、正文、结尾
 3. 内容有价值，避免空话
-4. 直接输出文章内容，使用 Markdown 格式
+4. 充分利用原文内容，补充细节和深度分析
+5. 直接输出文章内容，使用 Markdown 格式
 
 开始扩写："""
     
