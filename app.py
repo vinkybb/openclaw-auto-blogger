@@ -51,7 +51,9 @@ class BlogPipeline:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # 初始化各模块
-        self.rss_fetcher = RSSFetcher(self.config.get('rss', {}))
+        # sources 在顶层配置，而非 rss 键下
+        rss_config = {'sources': self.config.get('sources', [])}
+        self.rss_fetcher = RSSFetcher(rss_config)
         self.summarizer = RSSSummarizer(self.config)
         self.expander = ArticleExpander(self.config)
         self.publisher = Publisher(self.config.get('publish', {}))
