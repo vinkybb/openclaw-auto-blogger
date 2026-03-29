@@ -352,7 +352,6 @@ body {
     background: var(--bg-card);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    cursor: pointer;
     transition: all var(--transition-fast);
     display: flex;
     align-items: center;
@@ -385,6 +384,7 @@ body {
     justify-content: center;
     transition: all var(--transition-fast);
     flex-shrink: 0;
+    cursor: pointer;
 }
 
 .source-card.selected .source-checkbox {
@@ -410,6 +410,8 @@ body {
 .source-info {
     flex: 1;
     min-width: 0;
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .source-name {

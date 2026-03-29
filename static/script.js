@@ -98,9 +98,9 @@ function renderSources() {
     }
     
     grid.innerHTML = state.sources.map((source, index) => `
-        <div class="source-card" onclick="toggleSource(${index})" data-index="${index}">
+        <div class="source-card ${state.selectedSources.has(index) ? 'selected' : ''}" data-index="${index}">
             <input type="checkbox" id="source-${index}" ${state.selectedSources.has(index) ? 'checked' : ''}>
-            <div class="source-checkbox">
+            <div class="source-checkbox" onclick="toggleSource(${index})">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
