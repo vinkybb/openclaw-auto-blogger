@@ -16,24 +16,24 @@ class Publisher:
     def __init__(self, config: dict):
         self.config = config or {}
     
-    def publish(self, title: str, content: str, tags: list = None, image_url: str = None) -> Dict:
+    def publish(
+        self,
+        title: str,
+        content: str,
+        tags: list = None,
+        image_url: str = None,
+        apply_local: bool = True,
+    ) -> Dict:
         """
         发布内容到配置的目标
-        
+
         Args:
-            title: 文章标题
-            content: Markdown内容
-            tags: 标签列表
-            image_url: 封面图URL
-        
-        Returns:
-            发布结果
+            apply_local: 为 False 时跳过本地写入（例如 CLI 已由 save_article 落盘时避免重复文件）。
         """
         results = {}
         tags = tags or []
-        
-        # 1. 本地静态博客
-        if self.config.get('local', {}).get('enabled', True):
+
+        if apply_local and self.config.get('local', {}).get('enabled', True):
             results['local'] = self._publish_local(title, content, tags, image_url)
         
         # 2. GitHub Pages
@@ -202,51 +202,68 @@ class Publisher:
         except Exception as e:
             return {'success': False, 'error': str(e)}
     
+    def _wordpress_rest_posts_url(self, wp_config: dict) -> str:
+        """
+        解析 WordPress REST 文章端点。
+        支持：站点根 URL、完整 .../wp-json/...、或旧的 xmlrpc.php（将替换为 /wp-json/wp/v2/posts）。
+        """
+        raw = (wp_config.get("url") or "").strip().rstrip("/")
+        if not raw:
+            return ""
+        if "/wp-json/" in raw:
+            if raw.endswith("/posts"):
+                return raw
+            return raw.rstrip("/") + "/posts"
+        if "xmlrpc.php" in raw:
+            base = raw.split("/xmlrpc.php")[0].rstrip("/")
+            return f"{base}/wp-json/wp/v2/posts"
+        return f"{raw}/wp-json/wp/v2/posts"
+
     def _publish_wordpress(self, title: str, content: str, tags: list, image_url: str = None) -> Dict:
-        """发布到WordPress"""
-        wp_config = self.config.get('wordpress', {})
-        url = wp_config.get('url', '').rstrip('/')
-        username = wp_config.get('username', '')
-        password = wp_config.get('password', '')
-        
-        if not all([url, username, password]):
-            return {'success': False, 'error': 'WordPress配置不完整'}
-        
+        """通过 WordPress REST API 发布（Application Password 基本认证）。"""
+        wp_config = self.config.get("wordpress", {})
+        posts_url = self._wordpress_rest_posts_url(wp_config)
+        username = wp_config.get("username", "")
+        password = wp_config.get("password", "")
+
+        if not all([posts_url, username, password]):
+            return {"success": False, "error": "WordPress 配置不完整（需 url、username、password）"}
+
         try:
-            # 转换Markdown为HTML
             import markdown
-            html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
-            
-            # 创建文章
+
+            html_content = markdown.markdown(
+                content, extensions=["tables", "fenced_code"]
+            )
+
             post_data = {
-                'title': title,
-                'content': html_content,
-                'status': 'publish',
-                'tags': tags
+                "title": title,
+                "content": html_content,
+                "status": "publish",
             }
-            
+
             response = requests.post(
-                f"{url}/posts",
+                posts_url,
                 auth=(username, password),
                 json=post_data,
-                timeout=30
+                timeout=30,
             )
-            
+
             if response.status_code == 201:
                 result = response.json()
                 return {
-                    'success': True,
-                    'id': result['id'],
-                    'url': result['link']
+                    "success": True,
+                    "id": result.get("id"),
+                    "url": result.get("link", ""),
                 }
-            else:
-                return {
-                    'success': False,
-                    'error': f"WordPress API错误: {response.status_code}"
-                }
-                
+            err_body = response.text[:500]
+            return {
+                "success": False,
+                "error": f"WordPress REST 错误 HTTP {response.status_code}: {err_body}",
+            }
+
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
     
     def _publish_webhook(self, title: str, content: str, tags: list, image_url: str = None) -> Dict:
         """通过Webhook发布"""

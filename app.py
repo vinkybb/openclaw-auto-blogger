@@ -7,9 +7,8 @@
 1. 从 RSS 源获取内容
 2. 使用 OpenClaw 进行信息摘要
 3. 使用 OpenClaw 进行深度扩写
-4. 配图生成（可选）
-5. 格式化为 Markdown
-6. 自动发布到指定平台
+4. 格式化为 Markdown
+5. 自动发布到指定平台
 """
 
 import os
@@ -74,8 +73,8 @@ class BlogPipeline:
     def _default_config(self) -> Dict[str, Any]:
         """默认配置"""
         return {
-            'rss': {'sources': [], 'fetch_interval': 3600},
-            'openclaw': {'base_url': 'http://localhost:3000', 'timeout': 300},
+            'rss': {'sources': []},
+            'openclaw': {'gateway_url': 'http://127.0.0.1:18789', 'timeout': 300},
             'publish': {'local': {'enabled': True, 'content_dir': './output'}},
             'content': {'summary_length': 200, 'article_length': 1500}
         }
@@ -199,56 +198,72 @@ class BlogPipeline:
         logger.info(f"文章已保存: {filepath}")
         return str(filepath)
     
-    def run(self, max_articles: int = None) -> List[Dict[str, Any]]:
+    def run(
+        self, max_articles: int = None, dry_run: bool = False
+    ) -> List[Dict[str, Any]]:
         """
         运行完整流水线
-        
+
         Args:
             max_articles: 最大处理文章数 (None 表示不限制)
-            
-        Returns:
-            处理结果列表
+            dry_run: 为 True 时不写入 Markdown、不写报告、不调用远程发布
         """
         logger.info("=== 博客流水线开始运行 ===")
-        
-        # 1. 获取文章
+        if dry_run:
+            logger.info("dry-run: 跳过保存文件与发布")
+
         articles = self.fetch_articles()
-        
+
         if max_articles:
             articles = articles[:max_articles]
-        
-        # 2. 处理每篇文章
+
         results = []
         for i, article in enumerate(articles, 1):
             logger.info(f"处理进度: {i}/{len(articles)}")
-            
+
             try:
                 result = self.process_article(article)
-                
-                # 3. 保存文章
-                filepath = self.save_article(result)
-                result['filepath'] = filepath
-                
-                # 4. 发布 (如果配置了)
-                if filepath and self.config.get('publish', {}).get('local', {}).get('enabled'):
-                    # 本地发布已通过保存完成
-                    result['published'] = True
-                
+                ar = result.get("article") or {}
+
+                if dry_run:
+                    result["filepath"] = None
+                else:
+                    filepath = self.save_article(result)
+                    result["filepath"] = filepath
+
+                    pub_cfg = self.config.get("publish") or {}
+                    remote_on = (
+                        pub_cfg.get("github", {}).get("enabled")
+                        or pub_cfg.get("wordpress", {}).get("enabled")
+                        or pub_cfg.get("webhook", {}).get("enabled")
+                    )
+                    if ar.get("success") and remote_on:
+                        body = ar.get("content", "")
+                        result["publish_results"] = self.publisher.publish(
+                            title=ar.get("title", result.get("title", "")),
+                            content=body,
+                            tags=ar.get("tags") or [],
+                            image_url=None,
+                            apply_local=False,
+                        )
+                    if result.get("filepath") and pub_cfg.get("local", {}).get(
+                        "enabled", True
+                    ):
+                        result["published"] = True
+
                 results.append(result)
-                
+
             except Exception as e:
                 logger.error(f"处理文章失败: {e}")
-                results.append({
-                    'original': article,
-                    'error': str(e),
-                    'success': False
-                })
-        
+                results.append(
+                    {"original": article, "error": str(e), "success": False}
+                )
+
         logger.info(f"=== 流水线运行完成，处理 {len(results)} 篇文章 ===")
-        
-        # 保存运行报告
-        self._save_report(results)
-        
+
+        if not dry_run:
+            self._save_report(results)
+
         return results
     
     def _save_report(self, results: List[Dict[str, Any]]):
@@ -292,7 +307,7 @@ def main():
         for a in articles[:10]:
             print(f"  - {a.get('title')}")
     else:
-        results = pipeline.run(max_articles=args.number)
+        results = pipeline.run(max_articles=args.number, dry_run=args.dry_run)
         
         success_count = sum(1 for r in results if r.get('article', {}).get('success', False))
         print(f"\n处理完成: {success_count}/{len(results)} 篇文章成功")

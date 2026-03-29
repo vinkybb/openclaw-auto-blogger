@@ -2,7 +2,7 @@
 内容扩写模块 - 使用 OpenClaw 将摘要扩写为完整文章
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from .openclaw_client import OpenClawClient
 
 
@@ -18,11 +18,29 @@ class ArticleExpander:
         """
         self.config = config or {}
         self.client = OpenClawClient(self.config.get('openclaw', {}))
-        
-        # 扩写配置
-        self.default_style = self.config.get('style', '深度分析')
-        self.default_word_count = self.config.get('word_count', 1500)
-    
+
+        content_cfg = self.config.get('content') or {}
+        self.default_style = content_cfg.get('style', '深度分析')
+        self.default_word_count = content_cfg.get('article_length', 1500)
+
+    def _spawn_text(
+        self,
+        prompt: str,
+        timeout: int,
+        min_chars_early_exit: int = 400,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        raw = self.client.spawn_agent(
+            prompt,
+            timeout_seconds=timeout,
+            min_chars_early_exit=min_chars_early_exit,
+        )
+        if isinstance(raw, dict) and raw.get("success") is False:
+            return None, raw.get("error") or "OpenClaw 调用失败"
+        text = self.client._extract_result(raw)
+        if text.startswith("错误:"):
+            return None, text
+        return text, None
+
     def expand(self, title: str, summary: str, source_url: str = None,
                style: str = None, word_count: int = None) -> Dict[str, Any]:
         """
@@ -62,6 +80,7 @@ class ArticleExpander:
 5. 格式要求：使用 Markdown 格式，适当使用标题层级
 
 文章要求原创，不要直接复制摘要内容。
+不要输出思考过程、计划、开场白或「我将撰写」类套话；直接输出成品文章。
 
 请按以下格式输出：
 
@@ -73,29 +92,36 @@ class ArticleExpander:
 标签: 标签1, 标签2, 标签3"""
 
         try:
-            result = self.client.spawn_agent(prompt, timeout_seconds=120)
-            text = self.client._extract_result(result)
-            
-            # 解析文章
+            text, err = self._spawn_text(prompt, 120)
+            if err:
+                return {
+                    "title": title,
+                    "content": "",
+                    "tags": [],
+                    "source_url": source_url,
+                    "success": False,
+                    "error": err,
+                }
+
             article = self._parse_article(text, title)
-            article['source_url'] = source_url
-            article['source_summary'] = summary
-            article['style'] = style
-            article['target_word_count'] = word_count
-            article['success'] = True
-            
+            article["source_url"] = source_url
+            article["source_summary"] = summary
+            article["style"] = style
+            article["target_word_count"] = word_count
+            article["success"] = True
+
             return article
-            
+
         except Exception as e:
             return {
-                'title': title,
-                'content': f"扩写失败: {str(e)}",
-                'tags': [],
-                'source_url': source_url,
-                'success': False,
-                'error': str(e)
+                "title": title,
+                "content": f"扩写失败: {str(e)}",
+                "tags": [],
+                "source_url": source_url,
+                "success": False,
+                "error": str(e),
             }
-    
+
     def expand_with_context(self, title: str, summary: str, 
                            context: str = None, source_url: str = None,
                            style: str = None, word_count: int = None) -> Dict[str, Any]:
@@ -144,24 +170,31 @@ class ArticleExpander:
 标签: 标签1, 标签2"""
 
         try:
-            result = self.client.spawn_agent(prompt, timeout_seconds=120)
-            text = self.client._extract_result(result)
-            
+            text, err = self._spawn_text(prompt, 120)
+            if err:
+                return {
+                    "title": title,
+                    "content": "",
+                    "tags": [],
+                    "success": False,
+                    "error": err,
+                }
+
             article = self._parse_article(text, title)
-            article['source_url'] = source_url
-            article['success'] = True
-            
+            article["source_url"] = source_url
+            article["success"] = True
+
             return article
-            
+
         except Exception as e:
             return {
-                'title': title,
-                'content': f"扩写失败: {str(e)}",
-                'tags': [],
-                'success': False,
-                'error': str(e)
+                "title": title,
+                "content": f"扩写失败: {str(e)}",
+                "tags": [],
+                "success": False,
+                "error": str(e),
             }
-    
+
     def rewrite(self, content: str, style: str = "更生动有趣") -> Dict[str, Any]:
         """
         重写文章，调整风格
@@ -192,24 +225,30 @@ class ArticleExpander:
 标签: 标签1, 标签2"""
 
         try:
-            result = self.client.spawn_agent(prompt, timeout_seconds=90)
-            text = self.client._extract_result(result)
-            
+            text, err = self._spawn_text(prompt, 90)
+            if err:
+                return {
+                    "title": "重写失败",
+                    "content": "",
+                    "success": False,
+                    "error": err,
+                }
+
             article = self._parse_article(text, "重写文章")
-            article['original_content'] = content
-            article['style'] = style
-            article['success'] = True
-            
+            article["original_content"] = content
+            article["style"] = style
+            article["success"] = True
+
             return article
-            
+
         except Exception as e:
             return {
-                'title': '重写失败',
-                'content': str(e),
-                'success': False,
-                'error': str(e)
+                "title": "重写失败",
+                "content": str(e),
+                "success": False,
+                "error": str(e),
             }
-    
+
     def generate_outline(self, title: str, summary: str) -> List[str]:
         """
         生成文章大纲
@@ -236,13 +275,12 @@ class ArticleExpander:
 只输出大纲，不要其他内容。"""
 
         try:
-            result = self.client.spawn_agent(prompt, timeout_seconds=30)
-            text = self.client._extract_result(result)
-            
-            # 解析大纲
-            outline = [line.strip() for line in text.split('\n') if line.strip()]
+            text, err = self._spawn_text(prompt, 30, min_chars_early_exit=40)
+            if err:
+                return [f"大纲生成失败: {err}"]
+            outline = [line.strip() for line in text.split("\n") if line.strip()]
             return outline
-            
+
         except Exception as e:
             return [f"大纲生成失败: {str(e)}"]
     
