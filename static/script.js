@@ -411,25 +411,8 @@ function formatDate(dateStr) {
 }
 
 function previewArticle(file) {
-    fetch(`${API_BASE}/api/articles/${encodeURIComponent(file)}`)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) {
-                showToast(data.error, 'error');
-                return;
-            }
-            // 显示模态框
-            document.getElementById('previewTitle').textContent = data.title || '文章预览';
-            // 渲染 Markdown
-            const html = marked.parse(data.content || '');
-            document.getElementById('previewBody').innerHTML = html;
-            document.getElementById('previewModal').style.display = 'flex';
-        })
-        .catch(err => showToast('加载失败: ' + err.message, 'error'));
-}
-
-function closePreviewModal() {
-    document.getElementById('previewModal').style.display = 'none';
+    // 跳转到预览编辑页面
+    window.location.href = `/preview?file=${encodeURIComponent(file)}`;
 }
 
 async function publishArticle(id) {

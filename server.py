@@ -1043,5 +1043,66 @@ def api_regenerate_article_section(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/preview')
+def preview_page():
+    """文章预览编辑页面"""
+    return render_template('preview.html')
+
+
+@app.route('/api/articles/<path:filename>/ai-modify', methods=['POST'])
+def api_ai_modify_text(filename):
+    """AI修改选中文字"""
+    try:
+        data = request.get_json()
+        selected_text = data.get('selected_text', '')
+        request_text = data.get('request', '')
+        full_content = data.get('full_content', '')
+        
+        if not selected_text or not request_text:
+            return jsonify({'error': '缺少必要参数'}), 400
+        
+        # 构建AI提示
+        system_prompt = """你是一个专业的文字编辑助手。用户会选中一段文字，然后告诉你想怎么修改。
+请根据用户的要求，返回修改后的文字。
+只返回修改后的文字内容本身，不要添加任何解释或markdown格式。"""
+
+        user_message = f"""文章上下文：
+{full_content[:500]}...
+
+选中的文字：
+"{selected_text}"
+
+修改要求：{request_text}
+
+请返回修改后的文字（只返回文字本身，不要加任何格式）："""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ]
+        
+        # 调用AI
+        from modules.openclaw_client import call_openclaw
+        response = call_openclaw(messages, task_type='chat')
+        
+        # 清理响应中的markdown格式标记
+        new_text = response.strip()
+        # 移除可能的代码块标记
+        if new_text.startswith('```'):
+            lines = new_text.split('\n')
+            new_text = '\n'.join(lines[1:-1] if lines[-1] == '```' else lines[1:])
+        
+        return jsonify({
+            'suggestion': '已生成修改建议',
+            'new_text': new_text
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
