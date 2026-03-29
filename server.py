@@ -651,6 +651,7 @@ def api_cancel():
         if not state.running:
             return jsonify({'error': '没有运行中的任务'}), 400
         state.cancelled = True
+        state.running = False
         
         # 终止所有进程
         for stage, proc in state.processes.items():
