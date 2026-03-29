@@ -431,7 +431,6 @@ function previewArticle(file) {
 function closePreviewModal() {
     document.getElementById('previewModal').style.display = 'none';
 }
-}
 
 async function publishArticle(id) {
     try {
