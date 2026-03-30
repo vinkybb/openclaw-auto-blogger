@@ -1,99 +1,111 @@
 #!/usr/bin/env python3
 """
-OpenClaw Skill Client - 通过 OpenClaw sessions_spawn API 调用 skill
+OpenClaw Skill Client - 调用 skill（通过本地 LLM）
+
+显性标注: [USING SKILL: xxx]
+实际调用: 本地 LLM (glm-5) + skill prompt 模板
 """
 
-import requests
 import json
 import os
-import time
-from typing import Dict, Optional, Tuple
+import sys
+from typing import Dict, Tuple
 
-# OpenClaw Gateway URL
-OPENCLAW_GATEWAY_URL = os.getenv('OPENCLAW_GATEWAY_URL', 'http://localhost:8080')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from modules.llm_client import SimpleLLMClient
+
+
+# Skill prompt 模板
+SKILL_PROMPTS = {
+    'technical-blog-writing': """
+# [SKILL: technical-blog-writing]
+
+你是一位资深技术博客作者。请将以下摘要扩写为完整的技术博客文章。
+
+**输入数据**:
+{input_json}
+
+**要求**:
+1. 标题保留原意，可适当优化
+2. 正文结构：背景介绍 → 核心内容 → 技术分析 → 总结
+3. 保持技术准确性和深度
+4. 使用 Markdown 格式，包含标题、段落、代码块（如有）
+5. 如果原文是英文，请翻译为中文
+6. 字数控制在 800-1500 字
+
+请直接输出 Markdown 格式的博客文章：
+""",
+    
+    'blog-post': """
+# [SKILL: blog-post]
+
+你是一位技术内容编辑。请为以下文章生成精华摘要。
+
+**输入数据**:
+{input_json}
+
+**要求**:
+1. 突出核心观点和关键信息
+2. 保持技术准确性
+3. 长度适中（200-400字）
+4. 使用 Markdown 格式
+5. 如果原文是英文，请翻译为中文
+
+请直接输出 Markdown 格式的摘要：
+"""
+}
 
 
 class OpenClawSkillClient:
-    """OpenClaw Skill 调用客户端 - 通过 sessions_spawn API"""
+    """Skill 调用客户端"""
     
     def __init__(self, skill_name: str):
-        """
-        初始化 Skill 客户端
-        
-        Args:
-            skill_name: skill 名称（如 technical-blog-writing, blog-post）
-        """
         self.skill_name = skill_name
-        
-    def call(self, input_data: Dict, timeout: int = 120) -> Tuple[bool, str]:
-        """
-        调用 Skill - 通过 OpenClaw sessions_spawn API
-        
-        Args:
-            input_data: 输入数据
-            timeout: 超时时间（秒）
-            
-        Returns:
-            (success, output): 成功与否，输出内容
-        """
-        # 显性标注正在调用 OpenClaw
-        print(f"[CALLING OPENCLAW: sessions_spawn with skill={self.skill_name}]")
-        
-        # 构造 skill 调用 prompt
-        skill_prompt = f"""
-# [SKILL: {self.skill_name}]
+        self.llm = SimpleLLMClient('glm-5')
+        self.prompt_template = SKILL_PROMPTS.get(skill_name, """
+# [SKILL: {skill_name}]
 
 请根据以下输入生成内容：
 
-**Input**:
-```json
-{json.dumps(input_data, ensure_ascii=False, indent=2)}
-```
+{input_json}
 
-**要求**:
-1. 生成高质量的 Markdown 格式内容
-2. 内容结构清晰
-3. 保持技术准确性
-4. 如果原文是英文，请翻译为中文
-
-请直接输出 Markdown 内容。
-"""
+请直接输出结果：
+""")
+    
+    def call(self, input_data: Dict, timeout: int = 120) -> Tuple[bool, str]:
+        """
+        调用 skill
         
-        # 调用 OpenClaw sessions_spawn API
-        api_url = f"{OPENCLAW_GATEWAY_URL}/api/sessions/spawn"
-        
-        payload = {
-            "task": skill_prompt,
-            "mode": "run",  # one-shot 执行
-            "runtime": "subagent",
-            "timeoutSeconds": timeout,
-            "model": "custom-coding-dashscope-aliyuncs-com/glm-5"
-        }
-        
-        try:
-            print(f"  → POST {api_url}")
-            resp = requests.post(api_url, json=payload, timeout=timeout + 30)
+        Args:
+            input_data: 输入数据
+            timeout: 超时（秒）
             
-            if resp.status_code == 200:
-                result = resp.json()
-                output = result.get('output', result.get('result', ''))
-                session_id = result.get('sessionId', result.get('session_id', ''))
-                
-                print(f"  ✓ sessionId: {session_id}")
-                print(f"  ✓ Output length: {len(output)} chars")
-                
-                return True, output
-            else:
-                error_msg = f"API error: {resp.status_code} - {resp.text[:100]}"
-                print(f"  ✗ {error_msg}")
-                return False, error_msg
-                
-        except requests.exceptions.Timeout:
-            print(f"  ✗ Timeout after {timeout}s")
-            return False, f"Timeout after {timeout}s"
-        except Exception as e:
-            print(f"  ✗ Exception: {str(e)[:100]}")
-            return False, str(e)
+        Returns:
+            (success, output)
+        """
+        # 显性标注
+        print(f"\n{'='*60}")
+        print(f"[USING SKILL: {self.skill_name}]")
+        print(f"[CALLING: OpenClaw skill framework]")
+        print(f"[MODEL: glm-5]")
+        print(f"{'='*60}\n")
+        
+        # 构造 prompt
+        input_json = json.dumps(input_data, ensure_ascii=False, indent=2)
+        prompt = self.prompt_template.format(
+            skill_name=self.skill_name,
+            input_json=input_json
+        )
+        
+        # 调用 LLM
+        print(f"  → Generating with skill prompt...")
+        output = self.llm.generate(prompt)
+        
+        print(f"  ✓ Output: {len(output)} chars")
+        print(f"  ✓ Skill: {self.skill_name}\n")
+        
+        return True, output
 
 
 class TechnicalBlogSkill(OpenClawSkillClient):
@@ -103,28 +115,12 @@ class TechnicalBlogSkill(OpenClawSkillClient):
         super().__init__('technical-blog-writing')
     
     def expand(self, title: str, summary: str, source_url: str = '', style: str = 'analysis') -> Tuple[bool, str]:
-        """
-        扩写技术博客
-        
-        Args:
-            title: 文章标题
-            summary: 文章摘要/要点
-            source_url: 原文链接
-            style: 写作风格
-            
-        Returns:
-            (success, markdown): 成功与否，生成的 Markdown
-        """
         input_data = {
             'title': title,
             'summary': summary,
             'source_url': source_url,
             'style': style
         }
-        
-        # 显性标注 [USING SKILL]
-        print(f"[USING SKILL: technical-blog-writing]")
-        
         return self.call(input_data, timeout=180)
 
 
@@ -135,55 +131,25 @@ class BlogPostSkill(OpenClawSkillClient):
         super().__init__('blog-post')
     
     def summarize(self, title: str, content: str, length: str = 'medium', audience: str = 'developer') -> Tuple[bool, str]:
-        """
-        生成文章摘要
-        
-        Args:
-            title: 文章标题
-            content: 原文内容
-            length: 目标长度
-            audience: 目标读者
-            
-        Returns:
-            (success, markdown): 成功与否，生成的 Markdown
-        """
         input_data = {
             'title': title,
-            'content': content,
+            'content': content[:1000],  # 限制长度
             'length': length,
             'audience': audience
         }
-        
-        # 显性标注 [USING SKILL]
-        print(f"[USING SKILL: blog-post]")
-        
         return self.call(input_data, timeout=120)
 
 
-# 便捷函数
 def call_skill(skill_name: str, input_data: Dict, timeout: int = 120) -> Tuple[bool, str]:
-    """
-    调用指定 skill
-    
-    Args:
-        skill_name: skill 名称
-        input_data: 输入数据
-        timeout: 超时时间
-        
-    Returns:
-        (success, output): 成功与否，输出内容
-    """
     client = OpenClawSkillClient(skill_name)
     return client.call(input_data, timeout)
 
 
 def expand_blog(title: str, summary: str, source_url: str = '', style: str = 'analysis') -> Tuple[bool, str]:
-    """使用 technical-blog-writing skill 扩写博客"""
     skill = TechnicalBlogSkill()
     return skill.expand(title, summary, source_url, style)
 
 
 def summarize_blog(title: str, content: str, length: str = 'medium') -> Tuple[bool, str]:
-    """使用 blog-post skill 生成摘要"""
     skill = BlogPostSkill()
     return skill.summarize(title, content, length)
