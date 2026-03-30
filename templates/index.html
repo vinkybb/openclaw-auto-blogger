@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog Pipeline Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>🚀 Blog Pipeline</h1>
+                <span class="subtitle">基于 OpenClaw 的博客自动生成流水线</span>
+            </div>
+            <div class="header-right">
+                <div class="status-badge" id="status-badge">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Idle</span>
+                </div>
+                <button class="btn btn-primary" id="btn-run">
+                    ⚡ 运行流水线
+                </button>
+                <button class="btn btn-secondary" id="btn-cancel" style="display:none;">
+                    ⏹ 停止
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Progress Section -->
+            <section class="progress-section" id="progress-section" style="display:none;">
+                <div class="progress-header">
+                    <h3>🔄 处理进度</h3>
+                    <span id="progress-percent">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-stats">
+                    <span>已处理: <strong id="articles-processed">0</strong></span>
+                    <span>总数: <strong id="total-articles">0</strong></span>
+                </div>
+            </section>
+
+            <!-- Stats Cards -->
+            <section class="stats-section">
+                <div class="stat-card">
+                    <div class="stat-icon">📰</div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-sources">0</div>
+                        <div class="stat-label">RSS 源</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📝</div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-articles">0</div>
+                        <div class="stat-label">已生成文章</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⏱</div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-last-run">-</div>
+                        <div class="stat-label">上次运行</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Two Column Layout -->
+            <div class="columns">
+                <!-- RSS Sources -->
+                <section class="sources-section">
+                    <h2>📡 RSS 源配置</h2>
+                    <div class="sources-list" id="sources-list">
+                        <!-- Dynamically loaded -->
+                    </div>
+                </section>
+
+                <!-- Log Panel -->
+                <section class="log-section">
+                    <h2>📋 运行日志</h2>
+                    <div class="log-container" id="log-container">
+                        <div class="log-empty">点击"运行流水线"开始处理...</div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Articles Section -->
+            <section class="articles-section">
+                <div class="articles-header">
+                    <h2>📄 生成的文章</h2>
+                    <div class="articles-actions">
+                        <input type="text" class="search-input" id="search-articles" placeholder="搜索文章...">
+                        <button class="btn btn-secondary" id="btn-refresh">
+                            🔄 刷新
+                        </button>
+                        <button class="btn btn-primary" id="btn-publish-selected" disabled>
+                            📤 发布选中
+                        </button>
+                    </div>
+                </div>
+                <div class="articles-grid" id="articles-grid">
+                    <!-- Dynamically loaded -->
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-left">
+                <a href="https://github.com/openclaw/openclaw" target="_blank">OpenClaw</a>
+                <span>·</span>
+                <a href="https://docs.openclaw.ai" target="_blank">文档</a>
+            </div>
+            <div class="footer-right">
+                <span id="server-status">✅ Server OK</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Article Preview Modal -->
+    <div class="modal" id="article-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">文章预览</h3>
+                <button class="modal-close" id="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <pre id="modal-content"></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-close-modal">关闭</button>
+                <button class="btn btn-primary" id="btn-publish-modal">📤 发布</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
