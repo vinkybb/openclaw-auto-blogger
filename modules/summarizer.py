@@ -1,168 +1,156 @@
+#!/usr/bin/env python3
 """
-摘要生成模块 - 使用 OpenClaw 进行内容摘要
+文章摘要模块 - 使用 OpenClaw skill: blog-post
+
+显性标注: [USING SKILL: blog-post]
+调用方式: OpenClaw sessions_spawn API
 """
 
-from typing import Dict, Any, Optional, List
-from .openclaw_client import OpenClawClient
+import os
+import sys
+from typing import Dict, Optional
+
+# 添加项目路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from modules.skill_client import BlogPostSkill
+from modules.llm_client import SimpleLLMClient
 
 
-class RSSSummarizer:
-    """RSS 内容摘要生成器"""
+class ArticleSummarizer:
+    """
+    文章摘要器
     
-    def __init__(self, config: Dict[str, Any] = None):
+    调用 OpenClaw sessions_spawn API 使用 [SKILL: blog-post]
+    将长文章浓缩为精华摘要。
+    """
+    
+    def __init__(self, use_skill: bool = True):
         """
-        初始化摘要生成器
+        初始化摘要器
         
         Args:
-            config: 配置字典，包含 OpenClaw 连接信息
+            use_skill: 是否使用 OpenClaw skill（默认 True）
         """
-        self.config = config or {}
-        self.client = OpenClawClient(self.config.get('openclaw', {}))
-    
-    def summarize(self, title: str, content: str, style: str = "简洁") -> Dict[str, Any]:
+        self.use_skill = use_skill
+        self.skill = BlogPostSkill() if use_skill else None
+        self.llm_client = SimpleLLMClient('glm-5')  # 回退用
+        
+    def summarize(self, article: Dict, length: str = 'medium') -> Dict:
         """
-        生成内容摘要
+        生成文章摘要 - 显性标注使用 OpenClaw skill
         
         Args:
-            title: 文章标题
-            content: 文章内容
-            style: 摘要风格 (简洁/详细/专业)
+            article: 文章数据（包含 title, content, description 等）
+            length: 摘要长度（short/medium/long）
             
         Returns:
-            包含 title, summary, word_count 的字典
+            包含摘要的文章数据（包含 skill_used 字段）
         """
-        # 构建摘要提示词
-        prompt = f"""请对以下文章进行{style}摘要：
+        title = article.get('title', '')
+        content = article.get('content', article.get('description', article.get('summary', '')))
+        
+        # ========== 显性标注：使用 OpenClaw skill ==========
+        print(f"\n{'='*60}")
+        print(f"[USING SKILL: blog-post]")
+        print(f"[CALLING: OpenClaw sessions_spawn API]")
+        print(f"[INPUT: title='{title[:50]}...']")
+        print(f"{'='*60}\n")
+        
+        if self.use_skill and self.skill:
+            success, summary = self.skill.summarize(
+                title=title,
+                content=content,
+                length=length,
+                audience='developer'
+            )
+            
+            if success:
+                article['ai_summary'] = summary
+                article['skill_used'] = 'blog-post'
+                article['skill_source'] = 'OpenClaw-sessions_spawn'
+                print(f"\n[SKILL SUCCESS] Output: {len(summary)} chars\n")
+            else:
+                # Skill 失败，回退到本地 LLM
+                print(f"\n[SKILL FAILED] Reason: {summary}")
+                print(f"[FALLBACK: Using local LLM glm-5]\n")
+                article['ai_summary'] = self._fallback_summarize(title, content, length)
+                article['skill_used'] = 'llm-fallback'
+                article['skill_source'] = 'local-glm-5'
+        else:
+            # 不使用 skill，直接用 LLM
+            print(f"\n[USING LLM: glm-5 (no skill)]\n")
+            article['ai_summary'] = self._fallback_summarize(title, content, length)
+            article['skill_used'] = 'llm-direct'
+            article['skill_source'] = 'local-glm-5'
+            
+        return article
+    
+    def _fallback_summarize(self, title: str, content: str, length: str) -> str:
+        """
+        回退摘要方法（使用本地 LLM）
+        """
+        length_guide = {
+            'short': '100-200字',
+            'medium': '200-400字',
+            'long': '400-600字'
+        }
+        
+        prompt = f"""
+请为以下文章生成摘要。
 
-标题：{title}
-
-内容：
-{content[:4000]}
+标题: {title}
+内容: {content[:1000]}
 
 要求：
-1. 保持客观，不添加个人观点
-2. 突出最重要的信息
-3. 语言流畅，逻辑清晰
-4. {"控制在 150-200 字" if style == "简洁" else "控制在 300-500 字"}
+1. 长度: {length_guide.get(length, '200-400字')}
+2. 突出核心观点和关键信息
+3. 保持技术准确性
+4. 如果原文是英文，请翻译为中文
 
-请直接输出摘要内容。"""
-
-        try:
-            raw = self.client.spawn_agent(
-                prompt,
-                timeout_seconds=self.client.timeout,
-                min_chars_early_exit=80,
-            )
-            if isinstance(raw, dict) and raw.get("success") is False:
-                err = raw.get("error") or "OpenClaw 调用失败"
-                return {
-                    "title": title,
-                    "summary": "",
-                    "word_count": 0,
-                    "style": style,
-                    "success": False,
-                    "error": err,
-                }
-            text = self.client._extract_result(raw)
-            if text.startswith("错误:"):
-                return {
-                    "title": title,
-                    "summary": "",
-                    "word_count": 0,
-                    "style": style,
-                    "success": False,
-                    "error": text,
-                }
-
-            return {
-                "title": title,
-                "summary": text,
-                "word_count": len(text),
-                "style": style,
-                "success": True,
-            }
-        except Exception as e:
-            return {
-                "title": title,
-                "summary": f"摘要生成失败: {str(e)}",
-                "word_count": 0,
-                "style": style,
-                "success": False,
-                "error": str(e)
-            }
-    
-    def summarize_batch(self, articles: List[Dict[str, Any]], style: str = "简洁") -> List[Dict[str, Any]]:
-        """
-        批量生成摘要
+摘要：
+"""
         
-        Args:
-            articles: 文章列表，每项包含 title 和 content
-            style: 摘要风格
-            
-        Returns:
-            摘要结果列表
-        """
-        results = []
-        for article in articles:
-            result = self.summarize(
-                title=article.get('title', ''),
-                content=article.get('content', ''),
-                style=style
-            )
-            result['source_url'] = article.get('url', '')
-            result['source_title'] = article.get('title', '')
-            results.append(result)
-        
-        return results
-    
-    def extract_key_points(self, content: str) -> List[str]:
-        """
-        提取关键要点
-        
-        Args:
-            content: 文章内容
-            
-        Returns:
-            关键要点列表
-        """
-        prompt = f"""请从以下内容中提取 5-7 个关键要点，每个要点一行：
-
-{content[:3000]}
-
-只输出要点列表，每行一个要点，不要编号。"""
-
-        try:
-            raw = self.client.spawn_agent(
-                prompt,
-                timeout_seconds=self.client.timeout,
-                min_chars_early_exit=50,
-            )
-            if isinstance(raw, dict) and raw.get("success") is False:
-                return [f"提取失败: {raw.get('error', 'unknown')}"]
-            text = self.client._extract_result(raw)
-            if text.startswith("错误:"):
-                return [text]
-            points = [p.strip() for p in text.split("\n") if p.strip()]
-            return points[:7]
-
-        except Exception as e:
-            return [f"提取失败: {str(e)}"]
+        summary = self.llm_client.generate(prompt)
+        return summary
 
 
-# 便捷函数
-def summarize_content(title: str, content: str, style: str = "简洁", 
-                      config: Dict[str, Any] = None) -> Dict[str, Any]:
+def summarize_article(article: Dict, use_skill: bool = True) -> Dict:
     """
-    便捷函数：生成内容摘要
+    生成摘要（便捷函数）
     
     Args:
-        title: 文章标题
-        content: 文章内容
-        style: 摘要风格
-        config: OpenClaw 配置
+        article: 文章数据
+        use_skill: 是否使用 OpenClaw skill
         
     Returns:
-        摘要结果字典
+        包含摘要的文章数据
     """
-    summarizer = RSSSummarizer(config)
-    return summarizer.summarize(title, content, style)
+    summarizer = ArticleSummarizer(use_skill=use_skill)
+    return summarizer.summarize(article)
+
+
+# 测试
+if __name__ == '__main__':
+    test_article = {
+        'title': 'Claude 3.5 Sonnet 发布',
+        'content': 'Anthropic 发布 Claude 3.5 Sonnet，性能超越 Claude 3 Opus，同时保持了高水平的推理能力和安全性。新模型在编程、数学、推理等任务上表现出色...'
+    }
+    
+    print("=" * 60)
+    print("Testing ArticleSummarizer with OpenClaw skill...")
+    print("=" * 60)
+    
+    summarizer = ArticleSummarizer(use_skill=True)
+    result = summarizer.summarize(test_article)
+    
+    print(f"\n{'='*60}")
+    print(f"[RESULT]")
+    print(f"  skill_used: {result.get('skill_used', 'unknown')}")
+    print(f"  skill_source: {result.get('skill_source', 'unknown')}")
+    print(f"  summary_length: {len(result.get('ai_summary', ''))}")
+    print(f"{'='*60}\n")
+    
+    if result.get('ai_summary'):
+        print(f"Summary preview:\n")
+        print(result['ai_summary'][:200] + "...")

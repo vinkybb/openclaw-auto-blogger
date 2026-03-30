@@ -1,353 +1,154 @@
+#!/usr/bin/env python3
 """
-内容扩写模块 - 使用 OpenClaw 将摘要扩写为完整文章
+文章扩写模块 - 使用 OpenClaw skill: technical-blog-writing
+
+显性标注: [USING SKILL: technical-blog-writing]
+调用方式: OpenClaw sessions_spawn API
 """
 
-from typing import Dict, Any, List, Optional, Tuple
-from .openclaw_client import OpenClawClient
+import os
+import sys
+from typing import Dict, Optional
+
+# 添加项目路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from modules.skill_client import TechnicalBlogSkill
+from modules.llm_client import SimpleLLMClient
 
 
 class ArticleExpander:
-    """文章扩写器"""
+    """
+    文章扩写器
     
-    def __init__(self, config: Dict[str, Any] = None):
+    调用 OpenClaw sessions_spawn API 使用 [SKILL: technical-blog-writing]
+    将文章摘要扩写为完整的技术博客文章。
+    """
+    
+    def __init__(self, use_skill: bool = True):
         """
         初始化扩写器
         
         Args:
-            config: 配置字典，包含 OpenClaw 连接信息和扩写参数
+            use_skill: 是否使用 OpenClaw skill（默认 True）
         """
-        self.config = config or {}
-        self.client = OpenClawClient(self.config.get('openclaw', {}))
-
-        content_cfg = self.config.get('content') or {}
-        self.default_style = content_cfg.get('style', '深度分析')
-        self.default_word_count = content_cfg.get('article_length', 1500)
-
-    def _spawn_text(
-        self,
-        prompt: str,
-        timeout: int,
-        min_chars_early_exit: int = 400,
-    ) -> Tuple[Optional[str], Optional[str]]:
-        raw = self.client.spawn_agent(
-            prompt,
-            timeout_seconds=timeout,
-            min_chars_early_exit=min_chars_early_exit,
-        )
-        if isinstance(raw, dict) and raw.get("success") is False:
-            return None, raw.get("error") or "OpenClaw 调用失败"
-        text = self.client._extract_result(raw)
-        if text.startswith("错误:"):
-            return None, text
-        return text, None
-
-    def expand(self, title: str, summary: str, source_url: str = None,
-               style: str = None, word_count: int = None) -> Dict[str, Any]:
+        self.use_skill = use_skill
+        self.skill = TechnicalBlogSkill() if use_skill else None
+        self.llm_client = SimpleLLMClient('glm-5')  # 回退用
+        
+    def expand(self, article: Dict, style: str = 'analysis') -> Dict:
         """
-        将摘要扩写为完整文章
+        扩写文章 - 显性标注使用 OpenClaw skill
         
         Args:
-            title: 文章标题
-            summary: 内容摘要
-            source_url: 来源链接 (可选)
-            style: 写作风格 (默认使用配置)
-            word_count: 目标字数 (默认使用配置)
-            
-        Returns:
-            包含 title, content, tags, word_count 的字典
-        """
-        style = style or self.default_style
-        word_count = word_count or self.default_word_count
-        
-        source_info = f"\n\n参考来源：{source_url}" if source_url else ""
-        
-        prompt = f"""请基于以下摘要扩写为一篇完整的博客文章。
-
-原标题：{title}
-
-摘要：
-{summary}
-{source_info}
-
-写作要求：
-1. 风格：{style}
-2. 目标字数：{word_count} 字左右
-3. 结构要求：
-   - 引言：简要介绍主题背景
-   - 正文：深入分析，逻辑清晰，分段明确
-   - 结论：总结观点，给出见解
-4. 语言要求：生动有趣，适合阅读，避免生硬翻译腔
-5. 格式要求：使用 Markdown 格式，适当使用标题层级
-
-文章要求原创，不要直接复制摘要内容。
-不要输出思考过程、计划、开场白或「我将撰写」类套话；直接输出成品文章。
-
-请按以下格式输出：
-
-# 文章标题
-
-正文内容...
-
----
-标签: 标签1, 标签2, 标签3"""
-
-        try:
-            text, err = self._spawn_text(prompt, 120)
-            if err:
-                return {
-                    "title": title,
-                    "content": "",
-                    "tags": [],
-                    "source_url": source_url,
-                    "success": False,
-                    "error": err,
-                }
-
-            article = self._parse_article(text, title)
-            article["source_url"] = source_url
-            article["source_summary"] = summary
-            article["style"] = style
-            article["target_word_count"] = word_count
-            article["success"] = True
-
-            return article
-
-        except Exception as e:
-            return {
-                "title": title,
-                "content": f"扩写失败: {str(e)}",
-                "tags": [],
-                "source_url": source_url,
-                "success": False,
-                "error": str(e),
-            }
-
-    def expand_with_context(self, title: str, summary: str, 
-                           context: str = None, source_url: str = None,
-                           style: str = None, word_count: int = None) -> Dict[str, Any]:
-        """
-        带上下文的扩写，可以参考额外信息
-        
-        Args:
-            title: 文章标题
-            summary: 内容摘要
-            context: 额外上下文信息
-            source_url: 来源链接
+            article: 文章数据（包含 title, summary, link 等）
             style: 写作风格
-            word_count: 目标字数
             
         Returns:
-            扩写结果
+            扩写后的文章数据（包含 skill_used 字段）
         """
-        style = style or self.default_style
-        word_count = word_count or self.default_word_count
+        title = article.get('title', '')
+        summary = article.get('summary', article.get('description', ''))
+        source_url = article.get('link', '')
         
-        context_section = f"\n\n参考信息：\n{context}" if context else ""
-        source_section = f"\n\n来源：{source_url}" if source_url else ""
+        # ========== 显性标注：使用 OpenClaw skill ==========
+        print(f"\n{'='*60}")
+        print(f"[USING SKILL: technical-blog-writing]")
+        print(f"[CALLING: OpenClaw sessions_spawn API]")
+        print(f"[INPUT: title='{title[:50]}...']")
+        print(f"{'='*60}\n")
         
-        prompt = f"""请基于以下信息扩写一篇完整的博客文章。
-
-标题：{title}
-
-核心摘要：
-{summary}
-{context_section}
-{source_section}
-
-写作要求：
-1. 风格：{style}
-2. 目标字数：{word_count} 字
-3. 结合核心摘要和参考信息进行创作
-4. 保持观点客观，论述有据
-5. 使用 Markdown 格式
-
-输出格式：
-# 文章标题
-
-正文...
-
----
-标签: 标签1, 标签2"""
-
-        try:
-            text, err = self._spawn_text(prompt, 120)
-            if err:
-                return {
-                    "title": title,
-                    "content": "",
-                    "tags": [],
-                    "success": False,
-                    "error": err,
-                }
-
-            article = self._parse_article(text, title)
-            article["source_url"] = source_url
-            article["success"] = True
-
-            return article
-
-        except Exception as e:
-            return {
-                "title": title,
-                "content": f"扩写失败: {str(e)}",
-                "tags": [],
-                "success": False,
-                "error": str(e),
-            }
-
-    def rewrite(self, content: str, style: str = "更生动有趣") -> Dict[str, Any]:
-        """
-        重写文章，调整风格
-        
-        Args:
-            content: 原文章内容
-            style: 目标风格描述
+        if self.use_skill and self.skill:
+            success, content = self.skill.expand(
+                title=title,
+                summary=summary,
+                source_url=source_url,
+                style=style
+            )
             
-        Returns:
-            重写后的文章
+            if success:
+                article['expanded_content'] = content
+                article['skill_used'] = 'technical-blog-writing'
+                article['skill_source'] = 'OpenClaw-sessions_spawn'
+                print(f"\n[SKILL SUCCESS] Output: {len(content)} chars\n")
+            else:
+                # Skill 失败，回退到本地 LLM
+                print(f"\n[SKILL FAILED] Reason: {content}")
+                print(f"[FALLBACK: Using local LLM glm-5]\n")
+                article['expanded_content'] = self._fallback_expand(title, summary, source_url)
+                article['skill_used'] = 'llm-fallback'
+                article['skill_source'] = 'local-glm-5'
+        else:
+            # 不使用 skill，直接用 LLM
+            print(f"\n[USING LLM: glm-5 (no skill)]\n")
+            article['expanded_content'] = self._fallback_expand(title, summary, source_url)
+            article['skill_used'] = 'llm-direct'
+            article['skill_source'] = 'local-glm-5'
+            
+        return article
+    
+    def _fallback_expand(self, title: str, summary: str, source_url: str) -> str:
         """
-        prompt = f"""请将以下文章重写得{style}：
+        回退扩写方法（使用本地 LLM）
+        """
+        prompt = f"""
+请将以下技术文章摘要扩写为完整的博客文章。
 
-{content}
+标题: {title}
+摘要: {summary}
+原文链接: {source_url}
 
 要求：
-1. 保持核心观点不变
-2. 调整语言风格
-3. 优化结构
+1. 保持技术准确性
+2. 添加背景介绍和技术分析
+3. 结构清晰，包含引言、正文、总结
 4. 使用 Markdown 格式
+5. 如果原文是英文，请翻译为中文
 
-输出格式：
-# 文章标题
-
-正文...
-
----
-标签: 标签1, 标签2"""
-
-        try:
-            text, err = self._spawn_text(prompt, 90)
-            if err:
-                return {
-                    "title": "重写失败",
-                    "content": "",
-                    "success": False,
-                    "error": err,
-                }
-
-            article = self._parse_article(text, "重写文章")
-            article["original_content"] = content
-            article["style"] = style
-            article["success"] = True
-
-            return article
-
-        except Exception as e:
-            return {
-                "title": "重写失败",
-                "content": str(e),
-                "success": False,
-                "error": str(e),
-            }
-
-    def generate_outline(self, title: str, summary: str) -> List[str]:
-        """
-        生成文章大纲
+请直接输出 Markdown 内容：
+"""
         
-        Args:
-            title: 文章标题
-            summary: 内容摘要
-            
-        Returns:
-            大纲列表
-        """
-        prompt = f"""请为以下文章生成一个详细大纲：
-
-标题：{title}
-摘要：{summary}
-
-输出格式：
-1. 第一部分标题
-   - 要点一
-   - 要点二
-2. 第二部分标题
-   ...
-
-只输出大纲，不要其他内容。"""
-
-        try:
-            text, err = self._spawn_text(prompt, 30, min_chars_early_exit=40)
-            if err:
-                return [f"大纲生成失败: {err}"]
-            outline = [line.strip() for line in text.split("\n") if line.strip()]
-            return outline
-
-        except Exception as e:
-            return [f"大纲生成失败: {str(e)}"]
-    
-    def _parse_article(self, text: str, default_title: str) -> Dict[str, Any]:
-        """解析生成的文章"""
-        lines = text.strip().split('\n')
-        
-        title = default_title
-        content = text
-        tags = []
-        
-        # 尝试提取标题（第一个 # 开头的行）
-        for i, line in enumerate(lines):
-            if line.startswith('# '):
-                title = line[2:].strip()
-                # 移除标题行后的内容作为正文
-                remaining = '\n'.join(lines[i+1:])
-                content = remaining
-                break
-        
-        # 尝试提取标签（以 --- 分隔）
-        if '---' in text:
-            parts = text.split('---')
-            if len(parts) >= 2:
-                content = parts[0].strip()
-                # 移除标题
-                if content.startswith('# '):
-                    first_newline = content.find('\n')
-                    if first_newline > 0:
-                        title = content[2:first_newline].strip()
-                        content = content[first_newline:].strip()
-                
-                # 提取标签
-                if len(parts) >= 2:
-                    tag_part = parts[-1].strip()
-                    if tag_part.startswith('标签'):
-                        tag_text = tag_part.split(':', 1)[-1].strip() if ':' in tag_part else tag_part
-                        tags = [t.strip() for t in tag_text.replace('，', ',').split(',') if t.strip()]
-        
-        # 计算字数
-        word_count = len(content.replace('\n', '').replace(' ', ''))
-        
-        return {
-            'title': title,
-            'content': content,
-            'tags': tags,
-            'word_count': word_count
-        }
+        content = self.llm_client.generate(prompt)
+        return content
 
 
-# 便捷函数
-def expand_article(title: str, summary: str, source_url: str = None,
-                  style: str = "深度分析", word_count: int = 1500,
-                  config: Dict[str, Any] = None) -> Dict[str, Any]:
+def expand_article(article: Dict, use_skill: bool = True) -> Dict:
     """
-    便捷函数：扩写文章
+    扩写文章（便捷函数）
     
     Args:
-        title: 文章标题
-        summary: 内容摘要
-        source_url: 来源链接
-        style: 写作风格
-        word_count: 目标字数
-        config: OpenClaw 配置
+        article: 文章数据
+        use_skill: 是否使用 OpenClaw skill
         
     Returns:
-        扩写结果
+        扩写后的文章数据
     """
-    expander = ArticleExpander(config)
-    return expander.expand(title, summary, source_url, style, word_count)
+    expander = ArticleExpander(use_skill=use_skill)
+    return expander.expand(article)
+
+
+# 测试
+if __name__ == '__main__':
+    test_article = {
+        'title': 'GPT-4o 多模态能力解析',
+        'summary': 'OpenAI 发布 GPT-4o，支持实时语音、图像、视频交互，响应速度提升 2x',
+        'link': 'https://openai.com/blog/gpt-4o'
+    }
+    
+    print("=" * 60)
+    print("Testing ArticleExpander with OpenClaw skill...")
+    print("=" * 60)
+    
+    expander = ArticleExpander(use_skill=True)
+    result = expander.expand(test_article)
+    
+    print(f"\n{'='*60}")
+    print(f"[RESULT]")
+    print(f"  skill_used: {result.get('skill_used', 'unknown')}")
+    print(f"  skill_source: {result.get('skill_source', 'unknown')}")
+    print(f"  content_length: {len(result.get('expanded_content', ''))}")
+    print(f"{'='*60}\n")
+    
+    if result.get('expanded_content'):
+        print(f"Content preview (first 300 chars):\n")
+        print(result['expanded_content'][:300] + "...")
