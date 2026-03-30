@@ -25,13 +25,15 @@ class ArticleExpander:
     将文章摘要扩写为完整的技术博客文章。
     """
     
-    def __init__(self, use_skill: bool = True):
+    def __init__(self, config: Dict = None, use_skill: bool = True):
         """
         初始化扩写器
         
         Args:
+            config: 配置字典（可选）
             use_skill: 是否使用 OpenClaw skill（默认 True）
         """
+        self.config = config or {}
         self.use_skill = use_skill
         self.skill = TechnicalBlogSkill() if use_skill else None
         self.llm_client = SimpleLLMClient('glm-5')  # 回退用
