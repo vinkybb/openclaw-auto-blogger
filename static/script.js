@@ -1,494 +1,279 @@
-/**
- * Blog Pipeline Dashboard - Frontend Logic
- */
+// Blog Pipeline UI Script - Complete Version with Select All & Status Toggle
 
-// State
-const state = {
-    status: 'idle',
-    selectedArticles: [],
-    logs: [],
-    pollInterval: null
-};
+const elements = {};
 
-// DOM Elements
-const elements = {
-    statusBadge: document.getElementById('status-badge'),
-    statusDot: document.querySelector('.status-dot'),
-    statusText: document.querySelector('.status-text'),
-    btnRun: document.getElementById('btn-run'),
-    btnCancel: document.getElementById('btn-cancel'),
-    progressSection: document.getElementById('progress-section'),
-    progressFill: document.getElementById('progress-fill'),
-    progressPercent: document.getElementById('progress-percent'),
-    articlesProcessed: document.getElementById('articles-processed'),
-    totalArticles: document.getElementById('total-articles'),
-    statSources: document.getElementById('stat-sources'),
-    statArticles: document.getElementById('stat-articles'),
-    statLastRun: document.getElementById('stat-last-run'),
-    sourcesList: document.getElementById('sources-list'),
-    logContainer: document.getElementById('log-container'),
-    articlesGrid: document.getElementById('articles-grid'),
-    searchArticles: document.getElementById('search-articles'),
-    btnRefresh: document.getElementById('btn-refresh'),
-    btnPublishSelected: document.getElementById('btn-publish-selected'),
-    modal: document.getElementById('article-modal'),
-    modalTitle: document.getElementById('modal-title'),
-    modalContent: document.getElementById('modal-content'),
-    modalClose: document.getElementById('modal-close'),
-    btnCloseModal: document.getElementById('btn-close-modal'),
-    btnPublishModal: document.getElementById('btn-publish-modal'),
-    serverStatus: document.getElementById('server-status')
-};
+// Initialize on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+    // Cache DOM elements
+    elements.runBtn = document.getElementById('runPipelineBtn');
+    elements.stopBtn = document.getElementById('stopPipelineBtn');
+    elements.clearBtn = document.getElementById('clearBtn');
+    elements.refreshBtn = document.getElementById('refreshBtn');
+    elements.statusBar = document.getElementById('statusBar');
+    elements.progressDiv = document.getElementById('progressDiv');
+    elements.progressFill = document.getElementById('progressFill');
+    elements.articlesGrid = document.getElementById('articlesGrid');
+    elements.logPanel = document.getElementById('logPanel');
+    elements.rssInput = document.getElementById('rssInput');
+    elements.topicInput = document.getElementById('topicInput');
+    
+    // Bind buttons
+    if (elements.runBtn) elements.runBtn.addEventListener('click', runPipeline);
+    if (elements.stopBtn) elements.stopBtn.addEventListener('click', stopPipeline);
+    if (elements.clearBtn) elements.clearBtn.addEventListener('click', clearLogs);
+    if (elements.refreshBtn) elements.refreshBtn.addEventListener('click', loadArticles);
+    
+    // Initial load
+    loadArticles();
+    startStatusPolling();
+});
 
-// ==================== API Functions ====================
+// Polling for status updates
+let statusInterval;
+function startStatusPolling() {
+    if (statusInterval) clearInterval(statusInterval);
+    statusInterval = setInterval(updateStatus, 2000);
+}
 
-async function fetchAPI(endpoint, options = {}) {
+async function updateStatus() {
     try {
-        const response = await fetch(`/api/${endpoint}`, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        updateStatusBar(data);
+    } catch (e) {
+        console.error('Status poll error:', e);
+    }
+}
+
+function updateStatusBar(status) {
+    if (!elements.statusBar) return;
+    
+    const statusMap = {
+        'idle': {color: '#888', text: '空闲'},
+        'running': {color: '#007bff', text: '运行中'},
+        'error': {color: '#dc3545', text: '错误'}
+    };
+    
+    const s = statusMap[status.status] || statusMap['idle'];
+    elements.statusBar.innerHTML = `
+        <span style="color:${s.color};font-weight:bold;">${s.text}</span>
+        ${status.current_task ? `<span> | ${status.current_task}</span>` : ''}
+        ${status.articles_processed ? `<span> | 已处理: ${status.articles_processed}</span>` : ''}
+    `;
+    
+    // Progress bar
+    if (elements.progressDiv && elements.progressFill) {
+        const progress = status.progress || 0;
+        elements.progressFill.style.width = `${progress}%`;
+        elements.progressFill.textContent = `${progress}%`;
+        elements.progressDiv.style.display = status.status === 'running' ? 'block' : 'none';
+    }
+    
+    // Update buttons
+    if (elements.runBtn) elements.runBtn.disabled = status.status === 'running';
+    if (elements.stopBtn) elements.stopBtn.disabled = status.status !== 'running';
+}
+
+async function runPipeline() {
+    const rss = elements.rssInput?.value || '';
+    const topic = elements.topicInput?.value || '';
+    
+    try {
+        const res = await fetch('/api/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({rss_url: rss, topic: topic})
         });
+        const data = await res.json();
         
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+        if (data.success) {
+            showToast('流水线已启动', 'success');
+            addLog('INFO', 'Pipeline started');
+        } else {
+            showToast('启动失败: ' + data.error, 'error');
         }
-        
-        return await response.json();
-    } catch (error) {
-        console.error(`API Error (${endpoint}):`, error);
-        return null;
+    } catch (e) {
+        showToast('请求失败: ' + e, 'error');
     }
 }
 
-async function loadStatus() {
-    const data = await fetchAPI('status');
-    if (data) {
-        updateStatus(data);
-    }
-}
-
-async function loadSources() {
-    const data = await fetchAPI('rss-sources');
-    if (data) {
-        renderSources(data.sources);
-        elements.statSources.textContent = data.total;
+async function stopPipeline() {
+    try {
+        const res = await fetch('/api/stop', {method: 'POST'});
+        const data = await res.json();
+        showToast(data.success ? '已停止' : '停止失败', data.success ? 'success' : 'error');
+    } catch (e) {
+        showToast('请求失败', 'error');
     }
 }
 
 async function loadArticles() {
-    const data = await fetchAPI('articles');
-    if (data) {
-        renderArticles(data.articles);
-        elements.statArticles.textContent = data.total;
-    }
-}
-
-async function loadLogs() {
-    const data = await fetchAPI('logs');
-    if (data) {
-        renderLogs(data.logs);
-    }
-}
-
-async function runPipeline() {
-    const data = await fetchAPI('pipeline', { method: 'POST' });
-    if (data) {
-        showToast('Pipeline started!', 'success');
-        startPolling();
-    } else {
-        showToast('Failed to start pipeline', 'error');
-    }
-}
-
-async function cancelPipeline() {
-    const data = await fetchAPI('cancel', { method: 'POST' });
-    if (data) {
-        showToast('Pipeline cancelled', 'warning');
-        stopPolling();
-    }
-}
-
-async function publishArticles(articleIds) {
-    const data = await fetchAPI('publish', {
-        method: 'POST',
-        body: JSON.stringify({ articles: articleIds })
-    });
-    
-    if (data) {
-        const success = data.results.filter(r => r.success).length;
-        showToast(`Published ${success} articles`, 'success');
-    } else {
-        showToast('Publish failed', 'error');
-    }
-}
-
-async function loadArticleDetail(articleId) {
-    const data = await fetchAPI(`article/${articleId}`);
-    if (data) {
-        showModal(data);
-    }
-}
-
-// ==================== UI Functions ====================
-
-function updateStatus(data) {
-    state.status = data.status;
-    
-    // Update badge
-    elements.statusBadge.className = `status-badge status-${data.status}`;
-    elements.statusText.textContent = 
-        data.status === 'running' ? 'Running' :
-        data.status === 'error' ? 'Error' :
-        data.status === 'cancelled' ? 'Cancelled' :
-        'Idle';
-    
-    // Update buttons
-    if (data.status === 'running') {
-        elements.btnRun.style.display = 'none';
-        elements.btnCancel.style.display = 'inline-flex';
-        elements.progressSection.style.display = 'block';
-    } else {
-        elements.btnRun.style.display = 'inline-flex';
-        elements.btnCancel.style.display = 'none';
-        if (data.progress === 100) {
-            setTimeout(() => {
-                elements.progressSection.style.display = 'none';
-            }, 2000);
+    try {
+        const res = await fetch('/api/articles');
+        const data = await res.json();
+        renderArticles(data.articles || []);
+        updateStatusBar({status: 'idle', articles_processed: data.total || 0});
+    } catch (e) {
+        console.error('Load articles failed:', e);
+        if (elements.articlesGrid) {
+            elements.articlesGrid.innerHTML = '<div class="error">加载失败，请刷新</div>';
         }
     }
-    
-    // Update progress
-    elements.progressFill.style.width = `${data.progress}%`;
-    elements.progressPercent.textContent = `${data.progress}%`;
-    elements.articlesProcessed.textContent = data.articles_processed;
-    elements.totalArticles.textContent = data.total_articles;
-    
-    // Update last run
-    if (data.last_run) {
-        const date = new Date(data.last_run);
-        elements.statLastRun.textContent = date.toLocaleString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    }
-}
-
-function renderSources(sources) {
-    elements.sourcesList.innerHTML = sources.map(source => `
-        <div class="source-item ${source.enabled ? '' : 'disabled'}">
-            <div class="source-icon">${source.type === 'rss' ? '📡' : '🌐'}</div>
-            <div class="source-info">
-                <div class="source-name">${source.name}</div>
-                <div class="source-url">${source.url}</div>
-            </div>
-            <div class="source-category">${source.category}</div>
-            <div class="source-toggle">
-                <input type="checkbox" ${source.enabled ? 'checked' : ''} disabled>
-            </div>
-        </div>
-    `).join('');
 }
 
 function renderArticles(articles) {
+    if (!elements.articlesGrid) return;
+    
     if (articles.length === 0) {
         elements.articlesGrid.innerHTML = `
-            <div class="articles-empty">
-                <div class="empty-icon">📭</div>
-                <div class="empty-text">还没有生成的文章</div>
-                <div class="empty-hint">点击"运行流水线"开始处理 RSS</div>
+            <div class="articles-empty" style="text-align:center;padding:40px;color:var(--text-muted);">
+                <div style="font-size:48px;margin-bottom:16px;">📭</div>
+                <div style="font-size:16px;">还没有生成的文章</div>
+                <div style="font-size:14px;margin-top:8px;">点击"运行流水线"开始处理 RSS</div>
             </div>
         `;
         return;
     }
     
-    const publishedCount = articles.filter(a => a.status === 'published').length;
-    const unpublishedCount = articles.length - publishedCount;
+    const published = articles.filter(a => a.status === 'published').length;
+    const unpublished = articles.length - published;
     
     elements.articlesGrid.innerHTML = `
-        <div class="articles-header" style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:8px;margin-bottom:12px;">
-            <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)" style="width:18px;height:18px;">
-            <label for="selectAll" style="font-size:14px;cursor:pointer;">全选 (${articles.length} 篇)</label>
+        <div class="articles-header" style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--bg-secondary);border-radius:8px;margin-bottom:12px;border:1px solid var(--border-color);">
+            <input type="checkbox" id="selectAllCb" style="width:18px;height:18px;cursor:pointer;">
+            <label for="selectAllCb" style="font-size:14px;cursor:pointer;user-select:none;">全选</label>
+            <span style="font-size:14px;color:var(--text-muted);">(${articles.length} 篇)</span>
             <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">
-                已发布: <strong style="color:var(--success-color);">${publishedCount}</strong> | 
-                未发布: <strong style="color:var(--warning-color);">${unpublishedCount}</strong>
+                已发布 <strong style="color:#228b22;">${published}</strong> | 未发布 <strong style="color:#ff8c00;">${unpublished}</strong>
             </span>
         </div>
+        <div class="articles-list">
         ${articles.map(article => `
-        <div class="article-card" data-id="${article.id}">
-            <input type="checkbox" class="article-select" data-id="${article.id}">
-            <div class="article-icon">📝</div>
-            <div class="article-info">
-                <div class="article-title">${escapeHtml(article.title)}</div>
-                <div class="article-meta">
-                    <span>${article.modified}</span>
-                    <span>${formatSize(article.size)}</span>
+            <div class="article-card" data-id="${article.id}">
+                <input type="checkbox" class="article-select" data-id="${article.id}" style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
+                <span style="font-size:24px;flex-shrink:0;">📝</span>
+                <div class="article-info" style="flex:1;min-width:0;overflow:hidden;">
+                    <div class="article-title" style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(article.title)}</div>
+                    <div style="font-size:12px;color:var(--text-muted);">
+                        <span>${article.modified}</span> · <span>${formatSize(article.size)}</span>
+                    </div>
+                </div>
+                <span class="status-badge ${article.status === 'published' ? 'published' : 'unpublished'}" style="font-size:12px;padding:4px 10px;border-radius:12px;flex-shrink:0;">
+                    ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
+                </span>
+                <div class="article-actions" style="display:flex;gap:8px;flex-shrink:0;">
+                    <button class="btn-icon" onclick="toggleStatus('${escapeHtml(article.file)}')" title="切换状态">${article.status === 'published' ? '📤' : '📥'}</button>
+                    <button class="btn-icon" onclick="loadArticleDetail('${article.id}')" title="预览">👁</button>
+                    <button class="btn-icon" onclick="downloadArticle('${article.id}')" title="下载">⬇</button>
+                    <button class="btn-icon btn-delete" onclick="deleteArticle('${escapeHtml(article.file)}')" title="删除">🗑</button>
                 </div>
             </div>
-            <span class="article-status ${article.status === 'published' ? 'status-published' : 'status-unpublished'}" style="font-size:12px;padding:2px 8px;border-radius:12px;margin-right:8px;">
-                ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
-            </span>
-            <div class="article-actions" style="display:flex;gap:8px;flex-shrink:0;">
-                <button class="btn-icon" onclick="toggleStatus('${article.id}', '${article.file}', '${article.status}')" title="切换状态">
-                    ${article.status === 'published' ? '📤' : '📥'}
-                </button>
-                <button class="btn-icon" onclick="loadArticleDetail('${article.id}')" title="预览">
-                    👁
-                </button>
-                <button class="btn-icon" onclick="downloadArticle('${article.id}')" title="下载">
-                    ⬇
-                </button>
-                <button class="btn-icon btn-delete" data-file="${article.file}" onclick="deleteArticle(this.dataset.file)" title="删除">
-                    🗑
-                </button>
-            </div>
+        `).join('')}
         </div>
-    `).join('')}
     `;
     
-    // Bind selection events
-    document.querySelectorAll('.article-select').forEach(cb => {
-        cb.addEventListener('change', updateSelection);
-    });
+    // Bind select-all
+    const selectAllCb = document.getElementById('selectAllCb');
+    if (selectAllCb) {
+        selectAllCb.addEventListener('change', (e) => {
+            document.querySelectorAll('.article-select').forEach(cb => cb.checked = e.target.checked);
+        });
+    }
 }
 
-function renderLogs(logs) {
-    if (logs.length === 0) {
-        elements.logContainer.innerHTML = `
-            <div class="log-empty">点击"运行流水线"开始处理...</div>
-        `;
-        return;
-    }
-    
-    // Only show new logs
-    const newLogs = logs.slice(-10);
-    newLogs.forEach(log => {
-        if (!state.logs.some(l => l.time === log.time && l.message === log.message)) {
-            state.logs.push(log);
-            appendLog(log);
+function toggleStatus(filename) {
+    if (!filename) return;
+    fetch(`/api/articles/${encodeURIComponent(filename)}/status`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({toggle: true})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            loadArticles();
+            showToast('状态已更新', 'success');
+        } else {
+            showToast('更新失败: ' + (data.error || '未知错误'), 'error');
         }
-    });
-    
-    // Keep only last 100
-    if (state.logs.length > 100) {
-        state.logs = state.logs.slice(-100);
-    }
+    })
+    .catch(e => showToast('请求失败', 'error'));
 }
 
-function appendLog(log) {
-    if (elements.logContainer.querySelector('.log-empty')) {
-        elements.logContainer.innerHTML = '';
-    }
-    
-    const logEl = document.createElement('div');
-    logEl.className = `log-item log-${log.level}`;
-    logEl.innerHTML = `
-        <span class="log-time">${log.time}</span>
-        <span class="log-message">${escapeHtml(log.message)}</span>
-    `;
-    elements.logContainer.appendChild(logEl);
-    
-    // Auto scroll
-    elements.logContainer.scrollTop = elements.logContainer.scrollHeight;
+function deleteArticle(filename) {
+    if (!confirm(`确定删除: ${filename}?`)) return;
+    fetch(`/api/articles/${encodeURIComponent(filename)}`, {method: 'DELETE'})
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            loadArticles();
+            showToast('已删除', 'success');
+        } else {
+            showToast('删除失败: ' + (data.error || '未知错误'), 'error');
+        }
+    })
+    .catch(e => showToast('请求失败', 'error'));
 }
 
-function updateSelection() {
-    const checkboxes = document.querySelectorAll('.article-select:checked');
-    state.selectedArticles = Array.from(checkboxes).map(cb => cb.dataset.id);
-    
-    elements.btnPublishSelected.disabled = state.selectedArticles.length === 0;
-    elements.btnPublishSelected.textContent = 
-        state.selectedArticles.length > 0 
-            ? `📤 发布选中 (${state.selectedArticles.length})`
-            : '📤 发布选中';
-}
-
-function showModal(article) {
-    elements.modalTitle.textContent = article.title;
-    elements.modalContent.textContent = article.content;
-    elements.modal.classList.add('active');
-    elements.modal.dataset.id = article.id;
-}
-
-function hideModal() {
-    elements.modal.classList.remove('active');
-}
-
-function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.classList.add('fade-out');
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-
-// ==================== Helpers ====================
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function formatSize(bytes) {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+function loadArticleDetail(articleId) {
+    fetch(`/api/articles/${articleId}`)
+    .then(r => r.json())
+    .then(data => {
+        if (data.content) {
+            // Show in modal or preview panel
+            const preview = document.getElementById('articlePreview');
+            if (preview) {
+                preview.innerHTML = `<pre style="white-space:pre-wrap;padding:16px;background:var(--bg-secondary);border-radius:8px;max-height:400px;overflow:auto;">${escapeHtml(data.content)}</pre>`;
+                preview.style.display = 'block';
+            }
+        }
+    })
+    .catch(e => showToast('加载失败', 'error'));
 }
 
 function downloadArticle(articleId) {
-    const link = document.createElement('a');
-    link.href = `/output/${articleId}.md`;
-    link.download = `${articleId}.md`;
-    link.click();
+    window.open(`/api/articles/${articleId}/download`, '_blank');
 }
 
-
-// ==================== Delete ====================
-
-function deleteArticle(filename) {
-    if (!filename) {
-        showToast('文件名无效', 'error');
-        return;
-    }
-    if (!confirm(`确定删除文章 "${filename}"？`)) return;
-    
-    fetch(`/api/articles/${encodeURIComponent(filename)}`, {method: 'DELETE'})
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showToast('删除成功', 'success');
-                loadArticles();
-            } else {
-                showToast('删除失败: ' + data.error, 'error');
-            }
-        })
-        .catch(err => {
-            console.error('Delete failed:', err);
-            showToast('删除失败', 'error');
-        });
+function updateSelection() {
+    const checked = document.querySelectorAll('.article-select:checked');
+    // Could update batch action buttons here
 }
 
-
-// ==================== Delete All ====================
-
-function deleteAllArticles() {
-    if (!confirm('确定删除所有文章？此操作不可恢复！')) return;
-    
-    fetch('/api/articles/delete-all', {method: 'POST'})
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                showToast(`已删除 ${data.deleted} 篇文章`, 'success');
-                loadArticles();
-            } else {
-                showToast('删除失败', 'error');
-            }
-        })
-        .catch(err => {
-            console.error('Delete all failed:', err);
-            showToast('删除失败', 'error');
-        });
+function clearLogs() {
+    if (elements.logPanel) elements.logPanel.innerHTML = '';
 }
 
-
-// ==================== Polling ====================
-
-function startPolling() {
-    if (state.pollInterval) return;
-    
-    state.pollInterval = setInterval(async () => {
-        await loadStatus();
-        await loadLogs();
-        
-        if (state.status !== 'running') {
-            stopPolling();
-            await loadArticles();
-        }
-    }, 1000);
+function addLog(level, message) {
+    if (!elements.logPanel) return;
+    const colors = {'INFO': '#007bff', 'WARN': '#ffc107', 'ERROR': '#dc3545'};
+    const time = new Date().toLocaleTimeString();
+    elements.logPanel.innerHTML += `<div style="color:${colors[level]||'#888'}">[${time}] ${level}: ${message}</div>`;
+    elements.logPanel.scrollTop = elements.logPanel.scrollHeight;
 }
 
-function stopPolling() {
-    if (state.pollInterval) {
-        clearInterval(state.pollInterval);
-        state.pollInterval = null;
-    }
+function showToast(message, type = 'info') {
+    const colors = {'success': '#28a745', 'error': '#dc3545', 'info': '#007bff'};
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position:fixed;top:20px;right:20px;padding:12px 20px;background:${colors[type]};
+        color:#fff;border-radius:8px;font-size:14px;z-index:9999;animation:fadeIn 0.3s;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
 }
 
-// ==================== Event Bindings ====================
-
-elements.btnRun.addEventListener('click', () => {
-    if (state.status !== 'running') {
-        state.logs = [];
-        elements.logContainer.innerHTML = '';
-        runPipeline();
-    }
-});
-
-elements.btnCancel.addEventListener('click', cancelPipeline);
-
-elements.btnRefresh.addEventListener('click', () => {
-    loadArticles();
-    showToast('Articles refreshed', 'info');
-});
-
-elements.btnPublishSelected.addEventListener('click', () => {
-    if (state.selectedArticles.length > 0) {
-        publishArticles(state.selectedArticles);
-    }
-});
-
-elements.modalClose.addEventListener('click', hideModal);
-elements.btnCloseModal.addEventListener('click', hideModal);
-elements.btnPublishModal.addEventListener('click', () => {
-    const articleId = elements.modal.dataset.id;
-    if (articleId) {
-        publishArticles([articleId]);
-        hideModal();
-    }
-});
-
-elements.searchArticles.addEventListener('input', (e) => {
-    const query = e.target.value.toLowerCase();
-    document.querySelectorAll('.article-card').forEach(card => {
-        const title = card.querySelector('.article-title').textContent.toLowerCase();
-        card.style.display = title.includes(query) ? '' : 'none';
-    });
-});
-
-// Close modal on outside click
-elements.modal.addEventListener('click', (e) => {
-    if (e.target === elements.modal) {
-        hideModal();
-    }
-});
-
-// ==================== Initialization ====================
-
-async function init() {
-    await loadStatus();
-    await loadSources();
-    await loadArticles();
-    
-    // If running, start polling
-    if (state.status === 'running') {
-        startPolling();
-    }
-    
-    // Periodic health check
-    setInterval(async () => {
-        const health = await fetchAPI('health');
-        elements.serverStatus.innerHTML = health 
-            ? '✅ Server OK'
-            : '❌ Server Error';
-    }, 30000);
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[m]);
 }
 
-// Start
-init();
+function formatSize(bytes) {
+    if (!bytes) return '0B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(1) + units[i];
+}

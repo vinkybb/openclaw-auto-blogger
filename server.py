@@ -152,11 +152,18 @@ def api_articles():
     articles = []
     
     if output_dir.exists():
-        for md_file in sorted(output_dir.glob('*.md'), reverse=True):
+        # Use iterdir instead of glob (glob fails on filenames with quotes)
+        for md_file in sorted(output_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if md_file.suffix != '.md' or not md_file.is_file():
+                continue
             try:
                 content = md_file.read_text(encoding='utf-8')
                 # Extract title from first line
                 title = content.split('\n')[0].replace('#', '').strip() or md_file.stem
+                # Check published status from content
+                status = 'unpublished'
+                if content.lower().startswith('status: published'):
+                    status = 'published'
                 # Get file stats
                 stat = md_file.stat()
                 articles.append({
@@ -165,7 +172,7 @@ def api_articles():
                     'file': md_file.name,
                     'size': stat.st_size,
                     'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
-                    'status': 'completed'
+                    'status': status
                 })
             except Exception as e:
                 logger.error(f"Error reading {md_file}: {e}")
