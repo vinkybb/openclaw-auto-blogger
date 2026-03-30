@@ -1,10 +1,11 @@
-// Blog Pipeline UI Script - Fixed Version
+// Blog Pipeline UI Script
 
 const elements = {};
+let lastLogCount = 0;
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-    // Cache DOM elements - matching index.html IDs
+    // Cache DOM elements
     elements.runBtn = document.getElementById('btn-run');
     elements.stopBtn = document.getElementById('btn-cancel');
     elements.refreshBtn = document.getElementById('btn-refresh');
@@ -44,12 +45,52 @@ document.addEventListener('DOMContentLoaded', () => {
     startStatusPolling();
 });
 
-// Polling for status updates
+// Polling for status and logs
 let statusInterval;
+let logInterval;
+
 function startStatusPolling() {
     if (statusInterval) clearInterval(statusInterval);
     statusInterval = setInterval(updateStatus, 2000);
-    updateStatus(); // Immediate first call
+    updateStatus();
+    
+    // Also poll logs
+    if (logInterval) clearInterval(logInterval);
+    logInterval = setInterval(loadLogs, 1000);
+    loadLogs();
+}
+
+async function loadLogs() {
+    try {
+        const res = await fetch('/api/logs');
+        const data = await res.json();
+        const logs = data.logs || [];
+        
+        if (logs.length > lastLogCount) {
+            renderLogs(logs);
+            lastLogCount = logs.length;
+        }
+    } catch (e) {
+        console.error('Load logs error:', e);
+    }
+}
+
+function renderLogs(logs) {
+    if (!elements.logPanel) return;
+    
+    // Remove empty state message
+    const emptyMsg = elements.logPanel.querySelector('.log-empty');
+    if (emptyMsg) emptyMsg.remove();
+    
+    const colors = {'info': '#007bff', 'warning': '#ffc107', 'error': '#dc3545', 'success': '#28a745'};
+    
+    // Clear and re-render all logs
+    elements.logPanel.innerHTML = logs.map(log => {
+        const color = colors[log.level] || '#888';
+        return `<div style="color:${color};"><span style="opacity:0.6">[${log.time}]</span> <strong>${log.level.toUpperCase()}</strong>: ${escapeHtml(log.message)}</div>`;
+    }).join('');
+    
+    elements.logPanel.scrollTop = elements.logPanel.scrollHeight;
 }
 
 async function updateStatus() {
@@ -103,6 +144,11 @@ function updateStatusBar(status) {
     if (elements.statLastRun && status.last_run) {
         elements.statLastRun.textContent = formatTime(status.last_run);
     }
+    
+    // Reload articles when pipeline completes
+    if (status.status === 'idle' && status.progress === 100) {
+        loadArticles();
+    }
 }
 
 async function runPipeline() {
@@ -119,7 +165,6 @@ async function runPipeline() {
         
         if (res.ok) {
             showToast('流水线已启动', 'success');
-            addLog('INFO', 'Pipeline started');
         } else {
             showToast('启动失败: ' + (data.error || '未知错误'), 'error');
         }
@@ -147,7 +192,6 @@ async function loadArticles() {
         const data = await res.json();
         renderArticles(data.articles || []);
         
-        // Update stat
         if (elements.statArticles) {
             elements.statArticles.textContent = data.total || 0;
         }
@@ -217,7 +261,6 @@ function renderArticles(articles) {
     const published = articles.filter(a => a.status === 'published').length;
     const unpublished = articles.length - published;
     
-    // Update articles count and stats in the actions bar
     if (elements.articlesCount) {
         elements.articlesCount.textContent = `(${articles.length} 篇) | 已发布 ${published} | 未发布 ${unpublished}`;
     }
@@ -247,12 +290,10 @@ function renderArticles(articles) {
         </div>
     `;
     
-    // Bind individual checkboxes
     document.querySelectorAll('.article-select').forEach(cb => {
         cb.addEventListener('change', updateSelection);
     });
     
-    // Reset select-all checkbox state
     if (elements.selectAllCb) {
         elements.selectAllCb.checked = false;
     }
@@ -277,13 +318,11 @@ function updateSelection() {
         elements.publishSelectedBtn.textContent = checked.length > 0 ? `📤 发布选中 (${checked.length})` : '📤 发布选中';
     }
     
-    // Show/hide delete selected button
     if (elements.deleteSelectedBtn) {
         elements.deleteSelectedBtn.style.display = checked.length > 0 ? 'inline-flex' : 'none';
         elements.deleteSelectedBtn.textContent = checked.length > 0 ? `🗑 删除选中 (${checked.length})` : '🗑 删除选中';
     }
     
-    // Update select-all checkbox state
     if (elements.selectAllCb) {
         if (checked.length === 0) {
             elements.selectAllCb.checked = false;
@@ -383,26 +422,6 @@ function previewArticle(articleId) {
 
 function downloadArticle(articleId) {
     window.open(`/api/articles/${articleId}/download`, '_blank');
-}
-
-function clearLogs() {
-    if (elements.logPanel) elements.logPanel.innerHTML = '';
-}
-
-function addLog(level, message) {
-    if (!elements.logPanel) return;
-    
-    // Remove empty state message if present
-    const emptyMsg = elements.logPanel.querySelector('.log-empty');
-    if (emptyMsg) emptyMsg.remove();
-    
-    const colors = {'INFO': '#007bff', 'WARN': '#ffc107', 'ERROR': '#dc3545', 'SUCCESS': '#28a745'};
-    const time = new Date().toLocaleTimeString();
-    const logLine = document.createElement('div');
-    logLine.style.color = colors[level] || '#888';
-    logLine.innerHTML = `<span style="opacity:0.6">[${time}]</span> <strong>${level}</strong>: ${escapeHtml(message)}`;
-    elements.logPanel.appendChild(logLine);
-    elements.logPanel.scrollTop = elements.logPanel.scrollHeight;
 }
 
 function showToast(message, type = 'info') {
