@@ -206,6 +206,12 @@ def api_run_pipeline():
             # Process each article
             processed = 0
             for article in articles:
+                # Check for cancellation
+                with state_lock:
+                    if pipeline_state['status'] == 'cancelled':
+                        add_log('Pipeline stopped by user', 'warning')
+                        return
+                
                 try:
                     title = article.get('title', 'Unknown')
                     add_log(f'Processing: {title[:50]}...', 'info')

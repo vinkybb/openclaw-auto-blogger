@@ -1,161 +1,150 @@
-# Blog Pipeline Configuration
-# 专注于 AI 和 AI 安全相关内容
-
-sources:
-  # ===== AI 安全 RSS 源 (优先级最高) =====
-  - name: "LessWrong AI安全"
-    type: rss
-    url: "https://www.lesswrong.com/feed.xml"
-    count: 10
-    enabled: true
-    tags: ["ai-safety", "alignment"]
-    
-  - name: "Alignment Forum"
-    type: rss
-    url: "https://www.alignmentforum.org/feed.xml"
-    count: 10
-    enabled: true
-    tags: ["ai-safety", "alignment"]
-
-  - name: "AI Weekly Newsletter"
-    type: rss
-    url: "https://aiweekly.substack.com/feed"
-    count: 5
-    enabled: true
-    tags: ["ai", "newsletter"]
-
-  # ===== AI 公司官方博客 =====
-  - name: "OpenAI Blog"
-    type: rss
-    url: "https://openai.com/blog/rss.xml"
-    count: 10
-    enabled: true
-    tags: ["ai", "openai"]
-    
-  - name: "Google AI Blog"
-    type: rss
-    url: "https://blog.google/technology/ai/rss/"
-    count: 10
-    enabled: true
-    tags: ["ai", "google"]
-    
-  - name: "MIT Tech Review AI"
-    type: rss
-    url: "https://www.technologyreview.com/feed/"
-    count: 10
-    enabled: true
-    tags: ["ai", "tech-review"]
-
-  - name: "DeepMind Blog"
-    type: rss
-    url: "https://deepmind.google/feed/"
-    count: 10
-    enabled: true
-    tags: ["ai", "deepmind"]
-
-  # ===== 中文 AI 源 =====
-  - name: "机器之心"
-    type: rss
-    url: "https://www.jiqizhixin.com/rss"
-    count: 15
-    enabled: true
-    tags: ["ai", "zh-CN"]
-    
-  - name: "新智元"
-    type: rss
-    url: "https://www.jiqizhixin.com/rss"
-    count: 15
-    enabled: true
-    tags: ["ai", "zh-CN"]
-
-  # ===== HackerNews AI 标签过滤 =====
-  - name: "HackerNews AI"
-    type: rss
-    url: "https://hnrss.org/frontpage?q=ai+OR+llm+OR+gpt+OR+machine+learning"
-    count: 15
-    enabled: true
-    tags: ["ai", "hackernews"]
-
-  # ===== bb-browser AI 相关 =====
-  - name: "HackerNews 热门"
-    type: bb-browser
-    command: hackernews/top
-    count: 10
-    enabled: true
-    tags: ["tech", "hackernews"]
-    
-  - name: "V2EX AI话题"
-    type: bb-browser
-    command: v2ex/hot
-    count: 10
-    enabled: true
-    tags: ["tech", "zh-CN"]
-
-  # ===== 通用科技源 (保留) =====
-  - name: "阮一峰博客"
-    type: rss
-    url: "https://www.ruanyifeng.com/blog/atom.xml"
-    count: 5
-    enabled: true
-    tags: ["tech", "zh-CN"]
-
-  # ===== 已禁用的源 =====
-  - name: "BBC News"
-    type: rss
-    url: "https://feeds.bbci.co.uk/news/rss.xml"
-    count: 10
-    enabled: false  # 网络问题
-    
-  - name: "36氪快讯"
-    type: bb-browser
-    command: 36kr/newsflash
-    count: 10
-    enabled: false  # 非纯 AI
-    
-  - name: "微博热搜"
-    type: bb-browser
-    command: weibo/hot
-    count: 10
-    enabled: false
-    
-  - name: "B站热门"
-    type: bb-browser
-    command: bilibili/popular
-    count: 10
-    enabled: false
-    
-  - name: "雪球热门股票"
-    type: bb-browser
-    command: xueqiu/hot-stock
-    count: 5
-    enabled: false
-
-# 输出配置
-output:
-  format: "markdown"
-  directory: "/root/home/blog-pipeline/output"
-  filename_template: "{date}-{source}-{id}.md"
-
-# AI 处理配置 (OpenClaw)
 ai:
   enabled: true
-  model: "custom-coding-dashscope-aliyuncs-com/glm-5"
-  summary_length: 200
+  model: custom-coding-dashscope-aliyuncs-com/glm-5
   rewrite_enabled: false
-  
-# 调度配置
+  summary_length: 200
+browser:
+  cdp_port: 9222
+  headless: true
+  timeout: 30
+logging:
+  file: /root/home/blog-pipeline/logs/pipeline.log
+  level: INFO
+output:
+  directory: /root/home/blog-pipeline/output
+  filename_template: '{date}-{source}-{id}.md'
+  format: markdown
 schedule:
   enabled: false
   interval_hours: 6
-  start_time: "08:00"
-
-# Chrome CDP 配置
-browser:
-  cdp_port: 9222
-  timeout: 30
-  headless: true
-
-# 日志配置
-logging:
-  level: "INFO"
-  file: "/root/home/blog-pipeline/logs/pipeline.log"
+  start_time: 08:00
+sources:
+- count: 10
+  enabled: true
+  name: LessWrong AI安全
+  tags:
+  - ai-safety
+  - alignment
+  type: rss
+  url: https://www.lesswrong.com/feed.xml
+- count: 10
+  enabled: true
+  name: Alignment Forum
+  tags:
+  - ai-safety
+  - alignment
+  type: rss
+  url: https://www.alignmentforum.org/feed.xml
+- count: 5
+  enabled: false
+  name: AI Weekly Newsletter
+  tags:
+  - ai
+  - newsletter
+  type: rss
+  url: https://aiweekly.substack.com/feed
+- count: 10
+  enabled: true
+  name: OpenAI Blog
+  tags:
+  - ai
+  - openai
+  type: rss
+  url: https://openai.com/blog/rss.xml
+- count: 10
+  enabled: false
+  name: Google AI Blog
+  tags:
+  - ai
+  - google
+  type: rss
+  url: https://blog.google/technology/ai/rss/
+- count: 10
+  enabled: false
+  name: MIT Tech Review AI
+  tags:
+  - ai
+  - tech-review
+  type: rss
+  url: https://www.technologyreview.com/feed/
+- count: 10
+  enabled: false
+  name: DeepMind Blog
+  tags:
+  - ai
+  - deepmind
+  type: rss
+  url: https://deepmind.google/feed/
+- count: 15
+  enabled: false
+  name: 机器之心
+  tags:
+  - ai
+  - zh-CN
+  type: rss
+  url: https://www.jiqizhixin.com/rss
+- count: 15
+  enabled: true
+  name: 新智元
+  tags:
+  - ai
+  - zh-CN
+  type: rss
+  url: https://www.jiqizhixin.com/rss
+- count: 15
+  enabled: false
+  name: HackerNews AI
+  tags:
+  - ai
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=ai+OR+llm+OR+gpt+OR+machine+learning
+- command: hackernews/top
+  count: 10
+  enabled: true
+  name: HackerNews 热门
+  tags:
+  - tech
+  - hackernews
+  type: bb-browser
+- command: v2ex/hot
+  count: 10
+  enabled: true
+  name: V2EX AI话题
+  tags:
+  - tech
+  - zh-CN
+  type: bb-browser
+- count: 5
+  enabled: true
+  name: 阮一峰博客
+  tags:
+  - tech
+  - zh-CN
+  type: rss
+  url: https://www.ruanyifeng.com/blog/atom.xml
+- count: 10
+  enabled: false
+  name: BBC News
+  type: rss
+  url: https://feeds.bbci.co.uk/news/rss.xml
+- command: 36kr/newsflash
+  count: 10
+  enabled: false
+  name: 36氪快讯
+  type: bb-browser
+- command: weibo/hot
+  count: 10
+  enabled: false
+  name: 微博热搜
+  type: bb-browser
+- command: bilibili/popular
+  count: 10
+  enabled: false
+  name: B站热门
+  type: bb-browser
+- command: xueqiu/hot-stock
+  count: 5
+  enabled: false
+  name: 雪球热门股票
+  type: bb-browser
