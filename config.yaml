@@ -125,6 +125,65 @@ sources:
   url: https://www.ruanyifeng.com/blog/atom.xml
 - count: 10
   enabled: false
+  name: Hugging Face Blog
+  tags:
+  - ai
+  - open-source
+  type: rss
+  url: https://huggingface.co/blog/feed.xml
+- count: 10
+  enabled: false
+  name: Anthropic Blog
+  tags:
+  - ai
+  - claude
+  - alignment
+  type: rss
+  url: https://anthropic.com/news/rss
+- count: 15
+  enabled: false
+  name: 量子位
+  tags:
+  - ai
+  - zh-CN
+  type: rss
+  url: https://www.qbitai.com/rss
+- count: 10
+  enabled: false
+  name: TechCrunch AI
+  tags:
+  - ai
+  - tech-news
+  type: rss
+  url: https://techcrunch.com/category/artificial-intelligence/feed/
+- count: 10
+  enabled: false
+  name: Meta AI Blog
+  tags:
+  - ai
+  - meta
+  - llama
+  type: rss
+  url: https://ai.meta.com/blog/rss/
+- count: 10
+  enabled: false
+  name: Stability AI Blog
+  tags:
+  - ai
+  - stable-diffusion
+  - generative
+  type: rss
+  url: https://stability.ai/news/rss
+- count: 10
+  enabled: false
+  name: The Gradient
+  tags:
+  - ai
+  - research
+  type: rss
+  url: https://thegradient.pub/rss.xml
+- count: 10
+  enabled: false
   name: BBC News
   type: rss
   url: https://feeds.bbci.co.uk/news/rss.xml
