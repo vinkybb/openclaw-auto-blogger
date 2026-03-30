@@ -62,7 +62,7 @@ class OpenClawSkillClient:
     
     def __init__(self, skill_name: str):
         self.skill_name = skill_name
-        self.llm = SimpleLLMClient('glm-5')
+        self.llm = SimpleLLMClient()  # 从 config.yaml 读取配置
         self.prompt_template = SKILL_PROMPTS.get(skill_name, """
 # [SKILL: {skill_name}]
 
@@ -88,7 +88,7 @@ class OpenClawSkillClient:
         print(f"\n{'='*60}")
         print(f"[USING SKILL: {self.skill_name}]")
         print(f"[CALLING: OpenClaw skill framework]")
-        print(f"[MODEL: glm-5]")
+        print(f"[MODEL: {self.llm.model}]")
         print(f"{'='*60}\n")
         
         # 构造 prompt

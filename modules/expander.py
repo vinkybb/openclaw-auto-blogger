@@ -36,7 +36,7 @@ class ArticleExpander:
         self.config = config or {}
         self.use_skill = use_skill
         self.skill = TechnicalBlogSkill() if use_skill else None
-        self.llm_client = SimpleLLMClient('glm-5')  # 回退用
+        self.llm_client = SimpleLLMClient()  # 从 config.yaml 读取
         
     def expand(self, article: Dict, style: str = 'analysis') -> Dict:
         """

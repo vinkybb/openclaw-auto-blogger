@@ -1,7 +1,10 @@
 ai:
   enabled: true
-  model: custom-coding-dashscope-aliyuncs-com/glm-5
-  rewrite_enabled: false
+  model: openclaw
+  api_key: vinkybbvinkybb
+  base_url: http://42.193.169.81:18789/v1
+  rewrite_enabled: true
+  summary_enabled: true
   summary_length: 200
 browser:
   cdp_port: 9222

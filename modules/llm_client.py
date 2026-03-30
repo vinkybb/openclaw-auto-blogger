@@ -12,24 +12,43 @@ from typing import Dict, Optional, List
 class SimpleLLMClient:
     """简单的 LLM API 客户端"""
     
-    def __init__(self, model: str = 'glm-5', api_key: Optional[str] = None, base_url: Optional[str] = None):
-        self.model = model
-        
-        # 从 providers.json 或环境变量获取凭证
-        if not api_key:
-            api_key, base_url = self._get_credentials()
-        
-        self.api_key = api_key
-        self.base_url = base_url or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    def __init__(self, model: str = 'openclaw', api_key: Optional[str] = None, base_url: Optional[str] = None):
+        # 从 config.yaml 读取默认配置
+        import yaml
+        config_file = os.path.expanduser('/root/home/blog-pipeline/config.yaml')
+        if os.path.exists(config_file) and not api_key:
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+            ai_config = config.get('ai', {})
+            self.model = ai_config.get('model', model)
+            self.api_key = ai_config.get('api_key', '')
+            self.base_url = ai_config.get('base_url', '')
+        else:
+            self.model = model
+            if not api_key:
+                api_key, base_url = self._get_credentials()
+            self.api_key = api_key
+            self.base_url = base_url or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
     
     def _get_credentials(self) -> tuple:
-        """从 providers.json 或环境变量获取 API credentials"""
+        """从 config.yaml / providers.json / 环境变量获取 API credentials"""
+        import yaml
+        
+        # 优先读取 blog-pipeline config.yaml
+        config_file = os.path.expanduser('/root/home/blog-pipeline/config.yaml')
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+            ai_config = config.get('ai', {})
+            if ai_config.get('api_key') and ai_config.get('base_url'):
+                return (ai_config['api_key'], ai_config['base_url'])
+        
+        # providers.json 备选
         providers_file = os.path.expanduser('~/.openclaw/providers.json')
         if os.path.exists(providers_file):
             with open(providers_file, 'r') as f:
                 providers = json.load(f)
             
-            # 优先使用 dashscope
             for name, provider in providers.items():
                 if 'dashscope' in name.lower():
                     return (
