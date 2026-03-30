@@ -75,6 +75,11 @@ class SimpleLLMClient:
         
         return ('', '')
     
+    def generate(self, prompt: str, model: Optional[str] = None) -> str:
+        """便捷方法：直接发送 prompt 并获取响应"""
+        messages = [{'role': 'user', 'content': prompt}]
+        return self.chat(messages, model)
+    
     def chat(self, messages: List[Dict], model: Optional[str] = None) -> str:
         """调用 Chat API"""
         if not self.api_key:
