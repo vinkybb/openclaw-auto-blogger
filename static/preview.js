@@ -8,17 +8,17 @@ let selectedEnd = 0;
 
 // 初始化
 function initPreview() {
-    // 从 URL 获取文件名
-    const params = new URLSearchParams(window.location.search);
-    currentFile = params.get('file');
+    // 从 URL 路径获取 article_id (格式: /preview/article_id)
+    const pathParts = window.location.pathname.split('/');
+    const articleId = pathParts[pathParts.length - 1];
     
-    if (!currentFile) {
+    if (!articleId) {
         showToast('未指定文章', 'error');
         return;
     }
     
     // 加载文章内容
-    loadArticle();
+    loadArticle(articleId);
     
     // 监听编辑器事件
     setupEditorEvents();
@@ -28,37 +28,38 @@ function initPreview() {
 }
 
 // 加载文章
-function loadArticle() {
-    fetch(`${API_BASE}/api/articles/${encodeURIComponent(currentFile)}`)
-        .then(r => r.json())
-        .then(data => {
+function loadArticle(articleId) {
+    fetch(API_BASE + '/api/article/' + articleId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
             if (data.error) {
                 showToast(data.error, 'error');
                 return;
             }
+            currentFile = data.file;
             document.getElementById('articleTitle').value = data.title || '';
             document.getElementById('editor').value = data.content || '';
             updateWordCount();
         })
-        .catch(err => showToast('加载失败: ' + err.message, 'error'));
+        .catch(function(err) { showToast('加载失败: ' + err.message, 'error'); });
 }
 
 // 设置编辑器事件
 function setupEditorEvents() {
-    const editor = document.getElementById('editor');
+    var editor = document.getElementById('editor');
     
     // 选中文字事件
-    editor.addEventListener('select', () => {
-        const start = editor.selectionStart;
-        const end = editor.selectionEnd;
-        const text = editor.value.substring(start, end);
+    editor.addEventListener('select', function() {
+        var start = editor.selectionStart;
+        var end = editor.selectionEnd;
+        var text = editor.value.substring(start, end);
         
         if (text.length > 0) {
             selectedText = text;
             selectedStart = start;
             selectedEnd = end;
             showSelectedPreview(text);
-            document.getElementById('selectionInfo').textContent = `已选 ${text.length} 字`;
+            document.getElementById('selectionInfo').textContent = '已选 ' + text.length + ' 字';
         } else {
             clearSelection();
         }
@@ -68,7 +69,7 @@ function setupEditorEvents() {
     editor.addEventListener('input', updateWordCount);
     
     // 键盘快捷键
-    editor.addEventListener('keydown', (e) => {
+    editor.addEventListener('keydown', function(e) {
         if (e.ctrlKey || e.metaKey) {
             if (e.key === 's') {
                 e.preventDefault();
@@ -80,9 +81,8 @@ function setupEditorEvents() {
 
 // 设置 AI 输入事件
 function setupAIInputEvents() {
-    const aiInput = document.getElementById('aiInput');
-    
-    aiInput.addEventListener('keydown', (e) => {
+    var aiInput = document.getElementById('aiInput');
+    aiInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendAIRequest();
@@ -92,8 +92,8 @@ function setupAIInputEvents() {
 
 // 显示选中预览
 function showSelectedPreview(text) {
-    const preview = document.getElementById('selectedPreview');
-    const previewText = document.getElementById('selectedTextPreview');
+    var preview = document.getElementById('selectedPreview');
+    var previewText = document.getElementById('selectedTextPreview');
     preview.style.display = 'block';
     previewText.textContent = text.length > 100 ? text.substring(0, 100) + '...' : text;
 }
@@ -109,29 +109,26 @@ function clearSelection() {
 
 // 更新字数
 function updateWordCount() {
-    const text = document.getElementById('editor').value;
-    // 统计中文字符和英文单词
-    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-    const englishWords = (text.match(/[a-zA-Z]+/g) || []).length;
-    const total = chineseChars + englishWords;
-    document.getElementById('wordCount').textContent = `${total} 字`;
+    var text = document.getElementById('editor').value;
+    var chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    var englishWords = (text.match(/[a-zA-Z]+/g) || []).length;
+    var total = chineseChars + englishWords;
+    document.getElementById('wordCount').textContent = total + ' 字';
 }
 
 // 插入格式
 function insertFormat(before, after) {
-    const editor = document.getElementById('editor');
-    const start = editor.selectionStart;
-    const end = editor.selectionEnd;
-    const text = editor.value;
+    var editor = document.getElementById('editor');
+    var start = editor.selectionStart;
+    var end = editor.selectionEnd;
+    var text = editor.value;
     
     if (start === end) {
-        // 无选中，直接插入
         editor.value = text.substring(0, start) + before + after + text.substring(end);
         editor.selectionStart = start + before.length;
         editor.selectionEnd = start + before.length;
     } else {
-        // 有选中，包裹
-        const selected = text.substring(start, end);
+        var selected = text.substring(start, end);
         editor.value = text.substring(0, start) + before + selected + after + text.substring(end);
         editor.selectionStart = start;
         editor.selectionEnd = end + before.length + after.length;
@@ -147,20 +144,19 @@ function useExample(text) {
 }
 
 // 发送 AI 请求
-async function sendAIRequest() {
-    const input = document.getElementById('aiInput');
-    const request = input.value.trim();
+function sendAIRequest() {
+    var input = document.getElementById('aiInput');
+    var request = input.value.trim();
     
     if (!request) {
         showToast('请输入修改需求', 'error');
         return;
     }
     
-    // 获取选中文字（如果没有预存的选中，尝试获取当前选中）
-    const editor = document.getElementById('editor');
+    var editor = document.getElementById('editor');
     if (!selectedText) {
-        const start = editor.selectionStart;
-        const end = editor.selectionEnd;
+        var start = editor.selectionStart;
+        var end = editor.selectionEnd;
         selectedText = editor.value.substring(start, end);
         selectedStart = start;
         selectedEnd = end;
@@ -171,74 +167,52 @@ async function sendAIRequest() {
         return;
     }
     
-    // 显示用户消息
     addChatMessage('user', request, selectedText);
-    
-    // 清空输入
     input.value = '';
-    
-    // 显示加载
     showLoading();
     
-    try {
-        const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(currentFile)}/ai-modify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                selected_text: selectedText,
-                request: request,
-                full_content: editor.value
-            })
-        });
-        
-        const result = await response.json();
-        
+    fetch(API_BASE + '/api/articles/' + encodeURIComponent(currentFile) + '/ai-modify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            selected_text: selectedText,
+            request: request,
+            full_content: editor.value
+        })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
         hideLoading();
-        
         if (result.error) {
-            addChatMessage('ai', `❌ ${result.error}`);
+            addChatMessage('ai', '❌ ' + result.error);
         } else {
             addChatMessage('ai', result.suggestion, null, result.new_text);
         }
-        
-    } catch (err) {
+    })
+    .catch(function(err) {
         hideLoading();
-        addChatMessage('ai', `❌ 请求失败: ${err.message}`);
-    }
+        addChatMessage('ai', '❌ 请求失败: ' + err.message);
+    });
 }
 
 // 添加聊天消息
-function addChatMessage(type, content, selectedText, newText) {
-    const container = document.getElementById('chatContainer');
+function addChatMessage(type, content, selText, newText) {
+    var container = document.getElementById('chatContainer');
     
-    // 移除欢迎消息
-    const welcome = container.querySelector('.chat-welcome');
+    var welcome = container.querySelector('.chat-welcome');
     if (welcome) welcome.remove();
     
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `chat-message message-${type}`;
+    var msgDiv = document.createElement('div');
+    msgDiv.className = 'chat-message message-' + type;
     
     if (type === 'user') {
-        msgDiv.innerHTML = `
-            <div class="message-header">
-                <span>你</span>
-            </div>
-            ${selectedText ? `<div class="message-selected">"${selectedText.length > 50 ? selectedText.substring(0, 50) + '...' : selectedText}"</div>` : ''}
-            <div class="message-content">${content}</div>
-        `;
+        msgDiv.innerHTML = '<div class="message-header"><span>你</span></div>' +
+            (selText ? '<div class="message-selected">"' + (selText.length > 50 ? selText.substring(0, 50) + '...' : selText) + '"</div>' : '') +
+            '<div class="message-content">' + content + '</div>';
     } else {
-        msgDiv.innerHTML = `
-            <div class="message-header">
-                <span>AI 助手</span>
-            </div>
-            <div class="message-content">${content}</div>
-            ${newText ? `
-                <div class="message-actions">
-                    <button class="action-btn action-btn-apply" onclick="applySuggestion('${escapeHtml(newText)}')">应用修改</button>
-                    <button class="action-btn" onclick="copyText('${escapeHtml(newText)}')">复制</button>
-                </div>
-            ` : ''}
-        `;
+        msgDiv.innerHTML = '<div class="message-header"><span>AI 助手</span></div>' +
+            '<div class="message-content">' + content + '</div>' +
+            (newText ? '<div class="message-actions"><button class="action-btn action-btn-apply" onclick="applySuggestion(\'' + escapeHtml(newText) + '\')">应用修改</button><button class="action-btn" onclick="copyText(\'' + escapeHtml(newText) + '\')">复制</button></div>' : '');
     }
     
     container.appendChild(msgDiv);
@@ -247,125 +221,108 @@ function addChatMessage(type, content, selectedText, newText) {
 
 // 显示加载
 function showLoading() {
-    const container = document.getElementById('chatContainer');
-    const loadingDiv = document.createElement('div');
+    var container = document.getElementById('chatContainer');
+    var loadingDiv = document.createElement('div');
     loadingDiv.className = 'chat-message message-ai message-loading';
     loadingDiv.id = 'loadingMessage';
-    loadingDiv.innerHTML = `
-        <div class="loading-spinner"></div>
-        <span>AI 正在思考...</span>
-    `;
+    loadingDiv.innerHTML = '<div class="loading-spinner"></div><span>AI 正在思考...</span>';
     container.appendChild(loadingDiv);
     container.scrollTop = container.scrollHeight;
 }
 
 // 隐藏加载
 function hideLoading() {
-    const loading = document.getElementById('loadingMessage');
+    var loading = document.getElementById('loadingMessage');
     if (loading) loading.remove();
 }
 
 // 应用建议
 function applySuggestion(newText) {
-    const editor = document.getElementById('editor');
-    
-    // 替换选中文字
-    const before = editor.value.substring(0, selectedStart);
-    const after = editor.value.substring(selectedEnd);
+    var editor = document.getElementById('editor');
+    var before = editor.value.substring(0, selectedStart);
+    var after = editor.value.substring(selectedEnd);
     editor.value = before + newText + after;
     
-    // 更新选中位置
-    const newEnd = selectedStart + newText.length;
+    var newEnd = selectedStart + newText.length;
     editor.selectionStart = selectedStart;
     editor.selectionEnd = newEnd;
     
-    // 更新预存的选中
     selectedText = newText;
     selectedEnd = newEnd;
     showSelectedPreview(newText);
     
     editor.focus();
     updateWordCount();
-    
     showToast('已应用修改', 'success');
 }
 
 // 复制文本
 function copyText(text) {
     navigator.clipboard.writeText(text)
-        .then(() => showToast('已复制', 'success'))
-        .catch(() => showToast('复制失败', 'error'));
+        .then(function() { showToast('已复制', 'success'); })
+        .catch(function() { showToast('复制失败', 'error'); });
 }
 
 // 保存文章
-async function saveArticle() {
-    const title = document.getElementById('articleTitle').value;
-    const content = document.getElementById('editor').value;
+function saveArticle() {
+    var title = document.getElementById('articleTitle').value;
+    var content = document.getElementById('editor').value;
     
-    try {
-        const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(currentFile)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title, content })
-        });
-        
-        const result = await response.json();
-        
+    fetch(API_BASE + '/api/articles/' + encodeURIComponent(currentFile), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title, content: content })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
         if (result.status === 'success') {
             showToast('保存成功', 'success');
         } else {
             showToast(result.message || '保存失败', 'error');
         }
-    } catch (err) {
-        showToast('保存失败: ' + err.message, 'error');
-    }
+    })
+    .catch(function(err) { showToast('保存失败: ' + err.message, 'error'); });
 }
 
 // 发布并返回
-async function publishAndReturn() {
-    // 先保存
-    await saveArticle();
+function publishAndReturn() {
+    saveArticle();
     
-    // 发布
-    try {
-        const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(currentFile)}/publish`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        
+    fetch(API_BASE + '/api/articles/' + encodeURIComponent(currentFile) + '/publish', {
+        method: 'POST'
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
         if (result.status === 'success') {
             showToast('发布成功', 'success');
-            // 返回工作台
-            setTimeout(() => window.location.href = '/', 1000);
+            setTimeout(function() { window.location.href = '/'; }, 1000);
         } else {
             showToast(result.message || '发布失败', 'error');
         }
-    } catch (err) {
-        showToast('发布失败: ' + err.message, 'error');
-    }
+    })
+    .catch(function(err) { showToast('发布失败: ' + err.message, 'error'); });
 }
 
 // Toast 通知
-function showToast(message, type = 'info') {
-    const container = document.getElementById('toastContainer');
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.innerHTML = `
-        <span class="toast-icon">${type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ'}</span>
-        <span class="toast-message">${message}</span>
-    `;
+function showToast(message, type) {
+    type = type || 'info';
+    var container = document.getElementById('toastContainer');
+    var toast = document.createElement('div');
+    toast.className = 'toast toast-' + type;
+    toast.innerHTML = '<span class="toast-icon">' + (type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ') + '</span><span class="toast-message">' + message + '</span>';
     container.appendChild(toast);
     
-    setTimeout(() => {
+    setTimeout(function() {
         toast.classList.add('fade-out');
-        setTimeout(() => toast.remove(), 300);
+        setTimeout(function() { toast.remove(); }, 300);
     }, 3000);
 }
 
 // HTML 转义
 function escapeHtml(text) {
-    return text.replace(/&/g, '&amp;')
-               .replace(/'/g, '&#39;')
-               .replace(/"/g, '&quot;');
+    return text.replace(/&/g, '\x26amp;')
+               .replace(/</g, '\x26lt;')
+               .replace(/>/g, '\x26gt;')
+               .replace(/'/g, '\x26#39;')
+               .replace(/"/g, '\x26quot;');
 }
