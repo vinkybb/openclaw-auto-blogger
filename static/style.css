@@ -100,7 +100,7 @@ body {
     background: var(--text-muted);
 }
 
-.status-badge.status-idle .status-dot { background: var(--text-muted); }
+.status-badge.status-idle .status-dot { background: #22c55e; }
 .status-badge.status-running .status-dot { 
     background: var(--accent-primary); 
     animation: pulse 1.5s infinite;
