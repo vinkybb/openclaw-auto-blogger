@@ -113,12 +113,15 @@ class BlogPipeline:
         
         # Step 1: 生成摘要
         logger.info(f"生成摘要: {title}")
-        summary_result = self.summarizer.summarize(title, content)
+        # 构造 article dict 传递给 summarizer
+        article_dict = {'title': title, 'content': content, 'description': content}
+        summary_result = self.summarizer.summarize(article_dict)
         result['summary'] = summary_result
         
         if not summary_result.get('success'):
-            logger.error(f"摘要生成失败: {summary_result.get('error')}")
-            return result
+            logger.error(f"摘要生成失败: {summary_result.get('error', 'Unknown error')}")
+            # 摘要失败不中断流程，使用原始内容继续
+            summary_result['summary'] = content[:500] if content else title
         
         # Step 2: 扩写为完整文章
         logger.info(f"扩写文章: {title}")

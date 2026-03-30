@@ -47,46 +47,62 @@ class RSSSummarizer:
             length: 摘要长度（short/medium/long）
             
         Returns:
-            包含摘要的文章数据（包含 skill_used 字段）
+            包含 success, summary, skill_used 字段的结果字典
         """
         title = article.get('title', '')
         content = article.get('content', article.get('description', article.get('summary', '')))
+        
+        # 返回标准格式（与 app.py 期望的格式一致）
+        result = {
+            'success': False,
+            'summary': '',
+            'title': title,
+            'skill_used': None,
+            'skill_source': None
+        }
         
         # ========== 显性标注：使用 OpenClaw skill ==========
         print(f"\n{'='*60}")
         print(f"[USING SKILL: blog-post]")
         print(f"[CALLING: OpenClaw sessions_spawn API]")
-        print(f"[INPUT: title='{title[:50]}...']")
+        print(f"[INPUT: title='{title[:50] if title else 'N/A'}...']")
         print(f"{'='*60}\n")
         
+        summary_content = None
+        
         if self.use_skill and self.skill:
-            success, summary = self.skill.summarize(
+            skill_success, skill_summary = self.skill.summarize(
                 title=title,
                 content=content,
                 length=length,
                 audience='developer'
             )
             
-            if success:
-                article['ai_summary'] = summary
-                article['skill_used'] = 'blog-post'
-                article['skill_source'] = 'OpenClaw-sessions_spawn'
-                print(f"\n[SKILL SUCCESS] Output: {len(summary)} chars\n")
+            if skill_success:
+                summary_content = skill_summary
+                result['skill_used'] = 'blog-post'
+                result['skill_source'] = 'OpenClaw-sessions_spawn'
+                print(f"\n[SKILL SUCCESS] Output: {len(skill_summary)} chars\n")
             else:
                 # Skill 失败，回退到本地 LLM
-                print(f"\n[SKILL FAILED] Reason: {summary}")
+                print(f"\n[SKILL FAILED] Reason: {skill_summary}")
                 print(f"[FALLBACK: Using local LLM glm-5]\n")
-                article['ai_summary'] = self._fallback_summarize(title, content, length)
-                article['skill_used'] = 'llm-fallback'
-                article['skill_source'] = 'local-glm-5'
+                summary_content = self._fallback_summarize(title, content, length)
+                result['skill_used'] = 'llm-fallback'
+                result['skill_source'] = 'local-glm-5'
         else:
             # 不使用 skill，直接用 LLM
             print(f"\n[USING LLM: glm-5 (no skill)]\n")
-            article['ai_summary'] = self._fallback_summarize(title, content, length)
-            article['skill_used'] = 'llm-direct'
-            article['skill_source'] = 'local-glm-5'
+            summary_content = self._fallback_summarize(title, content, length)
+            result['skill_used'] = 'llm-direct'
+            result['skill_source'] = 'local-glm-5'
+        
+        # 设置成功状态
+        if summary_content:
+            result['success'] = True
+            result['summary'] = summary_content
             
-        return article
+        return result
     
     def _fallback_summarize(self, title: str, content: str, length: str) -> str:
         """

@@ -38,58 +38,85 @@ class ArticleExpander:
         self.skill = TechnicalBlogSkill() if use_skill else None
         self.llm_client = SimpleLLMClient()  # 从 config.yaml 读取
         
-    def expand(self, article: Dict, style: str = 'analysis') -> Dict:
+    def expand(self, title: str = None, summary: str = None, source_url: str = None,
+               article: Dict = None, style: str = 'analysis', word_count: int = 1500) -> Dict:
         """
-        扩写文章 - 显性标注使用 OpenClaw skill
+        扩写文章 - 支持两种调用方式：
+        
+        1. 分开参数: expand(title='...', summary='...', source_url='...')
+        2. Dict参数: expand(article={'title': '...', 'summary': '...', 'link': '...'})
         
         Args:
-            article: 文章数据（包含 title, summary, link 等）
+            title: 文章标题（分开参数模式）
+            summary: 文章摘要（分开参数模式）
+            source_url: 原文链接（分开参数模式）
+            article: 文章数据 Dict（兼容模式）
             style: 写作风格
+            word_count: 目标字数
             
         Returns:
-            扩写后的文章数据（包含 skill_used 字段）
+            扩写后的文章数据（包含 success, content, skill_used 字段）
         """
-        title = article.get('title', '')
-        summary = article.get('summary', article.get('description', ''))
-        source_url = article.get('link', '')
+        # 支持两种调用方式
+        if article:
+            title = title or article.get('title', '')
+            summary = summary or article.get('summary', article.get('description', ''))
+            source_url = source_url or article.get('link', '')
+        
+        # 返回标准格式（与 app.py 期望的格式一致）
+        result = {
+            'success': False,
+            'title': title,
+            'content': '',
+            'tags': [],
+            'skill_used': None,
+            'skill_source': None
+        }
         
         # ========== 显性标注：使用 OpenClaw skill ==========
         print(f"\n{'='*60}")
         print(f"[USING SKILL: technical-blog-writing]")
         print(f"[CALLING: OpenClaw sessions_spawn API]")
-        print(f"[INPUT: title='{title[:50]}...']")
+        print(f"[INPUT: title='{title[:50] if title else 'N/A'}...']")
         print(f"{'='*60}\n")
         
         if self.use_skill and self.skill:
-            success, content = self.skill.expand(
+            skill_success, skill_content = self.skill.expand(
                 title=title,
                 summary=summary,
                 source_url=source_url,
                 style=style
             )
             
-            if success:
-                article['expanded_content'] = content
-                article['skill_used'] = 'technical-blog-writing'
-                article['skill_source'] = 'OpenClaw-sessions_spawn'
-                print(f"\n[SKILL SUCCESS] Output: {len(content)} chars\n")
+            if skill_success:
+                result['success'] = True
+                result['content'] = skill_content
+                result['skill_used'] = 'technical-blog-writing'
+                result['skill_source'] = 'OpenClaw-sessions_spawn'
+                print(f"\n[SKILL SUCCESS] Output: {len(skill_content)} chars\n")
             else:
                 # Skill 失败，回退到本地 LLM
-                print(f"\n[SKILL FAILED] Reason: {content}")
+                print(f"\n[SKILL FAILED] Reason: {skill_content}")
                 print(f"[FALLBACK: Using local LLM glm-5]\n")
-                article['expanded_content'] = self._fallback_expand(title, summary, source_url)
-                article['skill_used'] = 'llm-fallback'
-                article['skill_source'] = 'local-glm-5'
+                llm_content = self._fallback_expand(title, summary, source_url, word_count)
+                if llm_content:
+                    result['success'] = True
+                    result['content'] = llm_content
+                    result['skill_used'] = 'llm-fallback'
+                    result['skill_source'] = 'local-glm-5'
         else:
             # 不使用 skill，直接用 LLM
             print(f"\n[USING LLM: glm-5 (no skill)]\n")
-            article['expanded_content'] = self._fallback_expand(title, summary, source_url)
-            article['skill_used'] = 'llm-direct'
-            article['skill_source'] = 'local-glm-5'
+            llm_content = self._fallback_expand(title, summary, source_url, word_count)
+            if llm_content:
+                result['success'] = True
+                result['content'] = llm_content
+                result['skill_used'] = 'llm-direct'
+                result['skill_source'] = 'local-glm-5'
             
-        return article
+        return result
     
-    def _fallback_expand(self, title: str, summary: str, source_url: str) -> str:
+    def _fallback_expand(self, title: str, summary: str, source_url: str, word_count: int = 1500) -> str:
         """
         回退扩写方法（使用本地 LLM）
         """
@@ -106,6 +133,7 @@ class ArticleExpander:
 3. 结构清晰，包含引言、正文、总结
 4. 使用 Markdown 格式
 5. 如果原文是英文，请翻译为中文
+6. 目标字数约 {word_count} 字
 
 请直接输出 Markdown 内容：
 """
