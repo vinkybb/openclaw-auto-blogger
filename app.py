@@ -189,11 +189,13 @@ class BlogPipeline:
         
         # 生成文件名
         title = result.get('article', {}).get('title', result.get('title', 'untitled'))
-        date_prefix = datetime.now().strftime('%Y-%m-%d')
-        # 清理标题作为文件名
+        date_prefix = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # 清理标题作为文件名：禁止引号和特殊字符
         safe_title = "".join(c if c.isalnum() or c in (' ', '-', '_') else '' for c in title)
-        safe_title = safe_title.strip().replace(' ', '-')[:50]
-        filename = f"{date_prefix}-{safe_title}.md"
+        safe_title = safe_title.strip().replace(' ', '_')[:40]  # 限制40字符
+        # 禁止引号和撇号
+        safe_title = safe_title.replace("'", "").replace('"', "").replace("'", "").replace('"', "")
+        filename = f"{date_prefix}_{safe_title}.md" if safe_title else f"{date_prefix}_untitled.md"
         
         filepath = self.output_dir / filename
         

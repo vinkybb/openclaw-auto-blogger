@@ -109,7 +109,7 @@ class SimpleLLMClient:
                 f'{self.base_url}/chat/completions',
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=180  # Increased from 60s for long articles
             )
             
             if response.status_code == 200:
@@ -118,7 +118,7 @@ class SimpleLLMClient:
             else:
                 raise Exception(f'API error: {response.status_code} - {response.text}')
         except requests.Timeout:
-            raise Exception('API timeout (60s)')
+            raise Exception('API timeout (180s)')
         except Exception as e:
             raise Exception(f'API call failed: {str(e)}')
     
