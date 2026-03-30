@@ -1,30 +1,46 @@
-// Blog Pipeline UI Script - Complete Version with Select All & Status Toggle
+// Blog Pipeline UI Script - Fixed Version
 
 const elements = {};
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-    // Cache DOM elements
-    elements.runBtn = document.getElementById('runPipelineBtn');
-    elements.stopBtn = document.getElementById('stopPipelineBtn');
-    elements.clearBtn = document.getElementById('clearBtn');
-    elements.refreshBtn = document.getElementById('refreshBtn');
-    elements.statusBar = document.getElementById('statusBar');
-    elements.progressDiv = document.getElementById('progressDiv');
-    elements.progressFill = document.getElementById('progressFill');
-    elements.articlesGrid = document.getElementById('articlesGrid');
-    elements.logPanel = document.getElementById('logPanel');
-    elements.rssInput = document.getElementById('rssInput');
-    elements.topicInput = document.getElementById('topicInput');
+    // Cache DOM elements - matching index.html IDs
+    elements.runBtn = document.getElementById('btn-run');
+    elements.stopBtn = document.getElementById('btn-cancel');
+    elements.refreshBtn = document.getElementById('btn-refresh');
+    elements.statusBar = document.getElementById('status-badge');
+    elements.progressDiv = document.getElementById('progress-section');
+    elements.progressFill = document.getElementById('progress-fill');
+    elements.progressPercent = document.getElementById('progress-percent');
+    elements.articlesProcessed = document.getElementById('articles-processed');
+    elements.totalArticles = document.getElementById('total-articles');
+    elements.articlesGrid = document.getElementById('articles-grid');
+    elements.logPanel = document.getElementById('log-container');
+    elements.sourcesList = document.getElementById('sources-list');
+    elements.searchInput = document.getElementById('search-articles');
+    elements.publishSelectedBtn = document.getElementById('btn-publish-selected');
+    elements.deleteSelectedBtn = document.getElementById('btn-delete-selected');
+    elements.selectAllCb = document.getElementById('selectAllCb');
+    elements.statSources = document.getElementById('stat-sources');
+    elements.statArticles = document.getElementById('stat-articles');
+    elements.statLastRun = document.getElementById('stat-last-run');
+    elements.articlesCount = document.getElementById('articles-count');
     
     // Bind buttons
     if (elements.runBtn) elements.runBtn.addEventListener('click', runPipeline);
     if (elements.stopBtn) elements.stopBtn.addEventListener('click', stopPipeline);
-    if (elements.clearBtn) elements.clearBtn.addEventListener('click', clearLogs);
     if (elements.refreshBtn) elements.refreshBtn.addEventListener('click', loadArticles);
+    if (elements.searchInput) elements.searchInput.addEventListener('input', filterArticles);
+    if (elements.publishSelectedBtn) elements.publishSelectedBtn.addEventListener('click', publishSelected);
+    if (elements.deleteSelectedBtn) elements.deleteSelectedBtn.addEventListener('click', deleteSelected);
+    if (elements.selectAllCb) elements.selectAllCb.addEventListener('change', (e) => {
+        document.querySelectorAll('.article-select').forEach(cb => cb.checked = e.target.checked);
+        updateSelection();
+    });
     
     // Initial load
     loadArticles();
+    loadSources();
     startStatusPolling();
 });
 
@@ -33,6 +49,7 @@ let statusInterval;
 function startStatusPolling() {
     if (statusInterval) clearInterval(statusInterval);
     statusInterval = setInterval(updateStatus, 2000);
+    updateStatus(); // Immediate first call
 }
 
 async function updateStatus() {
@@ -42,6 +59,9 @@ async function updateStatus() {
         updateStatusBar(data);
     } catch (e) {
         console.error('Status poll error:', e);
+        if (elements.statusBar) {
+            elements.statusBar.innerHTML = '<span class="status-dot" style="background:#dc3545;"></span><span class="status-text">连接失败</span>';
+        }
     }
 }
 
@@ -49,59 +69,73 @@ function updateStatusBar(status) {
     if (!elements.statusBar) return;
     
     const statusMap = {
-        'idle': {color: '#888', text: '空闲'},
-        'running': {color: '#007bff', text: '运行中'},
-        'error': {color: '#dc3545', text: '错误'}
+        'idle': {color: '#28a745', text: '空闲', dotClass: 'idle'},
+        'running': {color: '#007bff', text: '运行中', dotClass: 'running'},
+        'error': {color: '#dc3545', text: '错误', dotClass: 'error'},
+        'cancelled': {color: '#ffc107', text: '已取消', dotClass: 'idle'}
     };
     
     const s = statusMap[status.status] || statusMap['idle'];
     elements.statusBar.innerHTML = `
-        <span style="color:${s.color};font-weight:bold;">${s.text}</span>
-        ${status.current_task ? `<span> | ${status.current_task}</span>` : ''}
-        ${status.articles_processed ? `<span> | 已处理: ${status.articles_processed}</span>` : ''}
+        <span class="status-dot ${s.dotClass}" style="background:${s.color};"></span>
+        <span class="status-text">${s.text}</span>
     `;
     
     // Progress bar
-    if (elements.progressDiv && elements.progressFill) {
+    if (elements.progressDiv) {
         const progress = status.progress || 0;
-        elements.progressFill.style.width = `${progress}%`;
-        elements.progressFill.textContent = `${progress}%`;
-        elements.progressDiv.style.display = status.status === 'running' ? 'block' : 'none';
+        if (status.status === 'running') {
+            elements.progressDiv.style.display = 'block';
+            if (elements.progressFill) elements.progressFill.style.width = `${progress}%`;
+            if (elements.progressPercent) elements.progressPercent.textContent = `${progress}%`;
+            if (elements.articlesProcessed) elements.articlesProcessed.textContent = status.articles_processed || 0;
+            if (elements.totalArticles) elements.totalArticles.textContent = status.total_articles || 0;
+        } else {
+            elements.progressDiv.style.display = 'none';
+        }
     }
     
     // Update buttons
-    if (elements.runBtn) elements.runBtn.disabled = status.status === 'running';
-    if (elements.stopBtn) elements.stopBtn.disabled = status.status !== 'running';
+    if (elements.runBtn) elements.runBtn.style.display = status.status === 'running' ? 'none' : 'inline-flex';
+    if (elements.stopBtn) elements.stopBtn.style.display = status.status === 'running' ? 'inline-flex' : 'none';
+    
+    // Update last run
+    if (elements.statLastRun && status.last_run) {
+        elements.statLastRun.textContent = formatTime(status.last_run);
+    }
 }
 
 async function runPipeline() {
-    const rss = elements.rssInput?.value || '';
-    const topic = elements.topicInput?.value || '';
+    if (!elements.runBtn) return;
+    elements.runBtn.disabled = true;
+    elements.runBtn.textContent = '⏳ 启动中...';
     
     try {
-        const res = await fetch('/api/run', {
+        const res = await fetch('/api/pipeline', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({rss_url: rss, topic: topic})
+            headers: {'Content-Type': 'application/json'}
         });
         const data = await res.json();
         
-        if (data.success) {
+        if (res.ok) {
             showToast('流水线已启动', 'success');
             addLog('INFO', 'Pipeline started');
         } else {
-            showToast('启动失败: ' + data.error, 'error');
+            showToast('启动失败: ' + (data.error || '未知错误'), 'error');
         }
     } catch (e) {
         showToast('请求失败: ' + e, 'error');
+    } finally {
+        elements.runBtn.disabled = false;
+        elements.runBtn.textContent = '⚡ 运行流水线';
     }
 }
 
 async function stopPipeline() {
     try {
-        const res = await fetch('/api/stop', {method: 'POST'});
+        const res = await fetch('/api/cancel', {method: 'POST'});
         const data = await res.json();
-        showToast(data.success ? '已停止' : '停止失败', data.success ? 'success' : 'error');
+        showToast(data.status === 'cancelled' ? '已停止' : '停止失败', data.status === 'cancelled' ? 'success' : 'error');
     } catch (e) {
         showToast('请求失败', 'error');
     }
@@ -112,13 +146,58 @@ async function loadArticles() {
         const res = await fetch('/api/articles');
         const data = await res.json();
         renderArticles(data.articles || []);
-        updateStatusBar({status: 'idle', articles_processed: data.total || 0});
+        
+        // Update stat
+        if (elements.statArticles) {
+            elements.statArticles.textContent = data.total || 0;
+        }
     } catch (e) {
         console.error('Load articles failed:', e);
         if (elements.articlesGrid) {
-            elements.articlesGrid.innerHTML = '<div class="error">加载失败，请刷新</div>';
+            elements.articlesGrid.innerHTML = '<div class="error" style="text-align:center;padding:40px;color:#dc3545;">加载失败，请刷新页面</div>';
         }
     }
+}
+
+async function loadSources() {
+    try {
+        const res = await fetch('/api/rss-sources');
+        const data = await res.json();
+        renderSources(data.sources || []);
+        
+        if (elements.statSources) {
+            elements.statSources.textContent = data.total || 0;
+        }
+    } catch (e) {
+        console.error('Load sources failed:', e);
+    }
+}
+
+function renderSources(sources) {
+    if (!elements.sourcesList) return;
+    
+    if (sources.length === 0) {
+        elements.sourcesList.innerHTML = `
+            <div class="source-empty" style="text-align:center;padding:20px;color:var(--text-muted);">
+                <div>暂无 RSS 源配置</div>
+                <div style="font-size:12px;margin-top:8px;">请编辑 config.yaml 添加源</div>
+            </div>
+        `;
+        return;
+    }
+    
+    elements.sourcesList.innerHTML = sources.map(source => `
+        <div class="source-item">
+            <span class="source-icon">${source.type === 'rss' ? '📡' : '🌐'}</span>
+            <div class="source-info">
+                <div class="source-name">${escapeHtml(source.name)}</div>
+                <div class="source-url">${escapeHtml(source.url)}</div>
+            </div>
+            <span class="source-status ${source.enabled ? 'enabled' : 'disabled'}">
+                ${source.enabled ? '✓' : '✗'}
+            </span>
+        </div>
+    `).join('');
 }
 
 function renderArticles(articles) {
@@ -138,18 +217,15 @@ function renderArticles(articles) {
     const published = articles.filter(a => a.status === 'published').length;
     const unpublished = articles.length - published;
     
+    // Update articles count and stats in the actions bar
+    if (elements.articlesCount) {
+        elements.articlesCount.textContent = `(${articles.length} 篇) | 已发布 ${published} | 未发布 ${unpublished}`;
+    }
+    
     elements.articlesGrid.innerHTML = `
-        <div class="articles-header" style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--bg-secondary);border-radius:8px;margin-bottom:12px;border:1px solid var(--border-color);">
-            <input type="checkbox" id="selectAllCb" style="width:18px;height:18px;cursor:pointer;">
-            <label for="selectAllCb" style="font-size:14px;cursor:pointer;user-select:none;">全选</label>
-            <span style="font-size:14px;color:var(--text-muted);">(${articles.length} 篇)</span>
-            <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">
-                已发布 <strong style="color:#228b22;">${published}</strong> | 未发布 <strong style="color:#ff8c00;">${unpublished}</strong>
-            </span>
-        </div>
         <div class="articles-list">
         ${articles.map(article => `
-            <div class="article-card" data-id="${article.id}">
+            <div class="article-card" data-id="${article.id}" data-file="${encodeURIComponent(article.file)}" data-title="${escapeHtml(article.title).toLowerCase()}">
                 <input type="checkbox" class="article-select" data-id="${article.id}" style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
                 <span style="font-size:24px;flex-shrink:0;">📝</span>
                 <div class="article-info" style="flex:1;min-width:0;overflow:hidden;">
@@ -162,47 +238,133 @@ function renderArticles(articles) {
                     ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
                 </span>
                 <div class="article-actions" style="display:flex;gap:8px;flex-shrink:0;">
-                    <button class="btn-icon" onclick="toggleStatus('${article.file}')" title="切换状态">${article.status === 'published' ? '📤' : '📥'}</button>
-                    <button class="btn-icon" onclick="loadArticleDetail('${article.id}')" title="预览">👁</button>
+                    <button class="btn-icon" onclick="previewArticle('${article.id}')" title="预览">👁</button>
                     <button class="btn-icon" onclick="downloadArticle('${article.id}')" title="下载">⬇</button>
-                    <button class="btn-icon btn-delete" onclick="deleteArticle('${article.file}')" title="删除">🗑</button>
+                    <button class="btn-icon btn-delete" onclick="deleteArticle('${encodeURIComponent(article.file)}')" title="删除">🗑</button>
                 </div>
             </div>
         `).join('')}
         </div>
     `;
     
-    // Bind select-all
-    const selectAllCb = document.getElementById('selectAllCb');
-    if (selectAllCb) {
-        selectAllCb.addEventListener('change', (e) => {
-            document.querySelectorAll('.article-select').forEach(cb => cb.checked = e.target.checked);
-        });
+    // Bind individual checkboxes
+    document.querySelectorAll('.article-select').forEach(cb => {
+        cb.addEventListener('change', updateSelection);
+    });
+    
+    // Reset select-all checkbox state
+    if (elements.selectAllCb) {
+        elements.selectAllCb.checked = false;
     }
 }
 
-function toggleStatus(filename) {
-    if (!filename) return;
-    fetch(`/api/articles/${encodeURIComponent(filename)}/status`, {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({toggle: true})
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            loadArticles();
-            showToast('状态已更新', 'success');
+function filterArticles() {
+    const query = elements.searchInput?.value?.toLowerCase() || '';
+    const cards = document.querySelectorAll('.article-card');
+    
+    cards.forEach(card => {
+        const title = card.dataset.title || '';
+        card.style.display = title.includes(query) ? 'flex' : 'none';
+    });
+}
+
+function updateSelection() {
+    const checked = document.querySelectorAll('.article-select:checked');
+    const total = document.querySelectorAll('.article-select');
+    
+    if (elements.publishSelectedBtn) {
+        elements.publishSelectedBtn.disabled = checked.length === 0;
+        elements.publishSelectedBtn.textContent = checked.length > 0 ? `📤 发布选中 (${checked.length})` : '📤 发布选中';
+    }
+    
+    // Show/hide delete selected button
+    if (elements.deleteSelectedBtn) {
+        elements.deleteSelectedBtn.style.display = checked.length > 0 ? 'inline-flex' : 'none';
+        elements.deleteSelectedBtn.textContent = checked.length > 0 ? `🗑 删除选中 (${checked.length})` : '🗑 删除选中';
+    }
+    
+    // Update select-all checkbox state
+    if (elements.selectAllCb) {
+        if (checked.length === 0) {
+            elements.selectAllCb.checked = false;
+            elements.selectAllCb.indeterminate = false;
+        } else if (checked.length === total.length) {
+            elements.selectAllCb.checked = true;
+            elements.selectAllCb.indeterminate = false;
         } else {
-            showToast('更新失败: ' + (data.error || '未知错误'), 'error');
+            elements.selectAllCb.checked = false;
+            elements.selectAllCb.indeterminate = true;
         }
-    })
-    .catch(e => showToast('请求失败', 'error'));
+    }
+}
+
+async function deleteSelected() {
+    const checked = document.querySelectorAll('.article-select:checked');
+    if (checked.length === 0) return;
+    
+    if (!confirm(`确定删除选中的 ${checked.length} 篇文章？此操作不可恢复。`)) return;
+    
+    const files = Array.from(checked).map(cb => {
+        const card = cb.closest('.article-card');
+        return card ? card.dataset.file : null;
+    }).filter(file => file);
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const file of files) {
+        try {
+            const res = await fetch(`/api/articles/${file}`, {method: 'DELETE'});
+            const data = await res.json();
+            if (data.success) {
+                successCount++;
+            } else {
+                failCount++;
+            }
+        } catch (e) {
+            failCount++;
+        }
+    }
+    
+    if (successCount > 0) {
+        showToast(`已删除 ${successCount} 篇文章`, 'success');
+    }
+    if (failCount > 0) {
+        showToast(`${failCount} 篇文章删除失败`, 'error');
+    }
+    
+    loadArticles();
+}
+
+async function publishSelected() {
+    const checked = document.querySelectorAll('.article-select:checked');
+    if (checked.length === 0) return;
+    
+    const ids = Array.from(checked).map(cb => cb.dataset.id);
+    
+    try {
+        const res = await fetch('/api/publish', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({articles: ids})
+        });
+        const data = await res.json();
+        
+        if (data.results) {
+            const success = data.results.filter(r => r.success).length;
+            showToast(`已发布 ${success}/${ids.length} 篇文章`, success > 0 ? 'success' : 'error');
+            loadArticles();
+        }
+    } catch (e) {
+        showToast('发布失败: ' + e, 'error');
+    }
 }
 
 function deleteArticle(filename) {
-    if (!confirm(`确定删除: ${filename}?`)) return;
-    fetch(`/api/articles/${encodeURIComponent(filename)}`, {method: 'DELETE'})
+    if (!filename) return;
+    if (!confirm('确定删除这篇文章？')) return;
+    
+    fetch(`/api/articles/${filename}`, {method: 'DELETE'})
     .then(r => r.json())
     .then(data => {
         if (data.success) {
@@ -215,29 +377,12 @@ function deleteArticle(filename) {
     .catch(e => showToast('请求失败', 'error'));
 }
 
-function loadArticleDetail(articleId) {
-    fetch(`/api/articles/${articleId}`)
-    .then(r => r.json())
-    .then(data => {
-        if (data.content) {
-            // Show in modal or preview panel
-            const preview = document.getElementById('articlePreview');
-            if (preview) {
-                preview.innerHTML = `<pre style="white-space:pre-wrap;padding:16px;background:var(--bg-secondary);border-radius:8px;max-height:400px;overflow:auto;">${escapeHtml(data.content)}</pre>`;
-                preview.style.display = 'block';
-            }
-        }
-    })
-    .catch(e => showToast('加载失败', 'error'));
+function previewArticle(articleId) {
+    window.open(`/preview/${articleId}`, '_blank');
 }
 
 function downloadArticle(articleId) {
     window.open(`/api/articles/${articleId}/download`, '_blank');
-}
-
-function updateSelection() {
-    const checked = document.querySelectorAll('.article-select:checked');
-    // Could update batch action buttons here
 }
 
 function clearLogs() {
@@ -246,29 +391,45 @@ function clearLogs() {
 
 function addLog(level, message) {
     if (!elements.logPanel) return;
-    const colors = {'INFO': '#007bff', 'WARN': '#ffc107', 'ERROR': '#dc3545'};
+    
+    // Remove empty state message if present
+    const emptyMsg = elements.logPanel.querySelector('.log-empty');
+    if (emptyMsg) emptyMsg.remove();
+    
+    const colors = {'INFO': '#007bff', 'WARN': '#ffc107', 'ERROR': '#dc3545', 'SUCCESS': '#28a745'};
     const time = new Date().toLocaleTimeString();
-    elements.logPanel.innerHTML += `<div style="color:${colors[level]||'#888'}">[${time}] ${level}: ${message}</div>`;
+    const logLine = document.createElement('div');
+    logLine.style.color = colors[level] || '#888';
+    logLine.innerHTML = `<span style="opacity:0.6">[${time}]</span> <strong>${level}</strong>: ${escapeHtml(message)}`;
+    elements.logPanel.appendChild(logLine);
     elements.logPanel.scrollTop = elements.logPanel.scrollHeight;
 }
 
 function showToast(message, type = 'info') {
-    const colors = {'success': '#28a745', 'error': '#dc3545', 'info': '#007bff'};
+    const colors = {'success': '#28a745', 'error': '#dc3545', 'info': '#007bff', 'warning': '#ffc107'};
     const toast = document.createElement('div');
     toast.style.cssText = `
-        position:fixed;top:20px;right:20px;padding:12px 20px;background:${colors[type]};
+        position:fixed;top:20px;right:20px;padding:12px 20px;background:${colors[type] || colors.info};
         color:#fff;border-radius:8px;font-size:14px;z-index:9999;animation:fadeIn 0.3s;
+        box-shadow:0 4px 12px rgba(0,0,0,0.15);
     `;
     toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
 }
 
 function escapeHtml(text) {
     if (!text) return '';
-    return text.replace(/[&<>"']/g, m => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    })[m]);
+    return text
+        .replace(/&/g, '\x26amp;')
+        .replace(/</g, '\x26lt;')
+        .replace(/>/g, '\x26gt;')
+        .replace(/"/g, '\x26quot;')
+        .replace(/'/g, '\x26#39;');
 }
 
 function formatSize(bytes) {
@@ -277,3 +438,91 @@ function formatSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return (bytes / Math.pow(1024, i)).toFixed(1) + units[i];
 }
+
+function formatTime(isoString) {
+    if (!isoString) return '-';
+    try {
+        const d = new Date(isoString);
+        return d.toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
+    } catch (e) {
+        return '-';
+    }
+}
+
+// Add CSS animation
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .btn-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 16px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: background 0.2s;
+    }
+    .btn-icon:hover {
+        background: var(--bg-secondary);
+    }
+    .btn-delete:hover {
+        background: #fee;
+    }
+    .article-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        transition: box-shadow 0.2s;
+    }
+    .article-card:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .status-badge.published {
+        background: #d4edda;
+        color: #155724;
+    }
+    .status-badge.unpublished {
+        background: #fff3cd;
+        color: #856404;
+    }
+    .source-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        margin-bottom: 6px;
+    }
+    .source-info {
+        flex: 1;
+        min-width: 0;
+    }
+    .source-name {
+        font-weight: 500;
+        font-size: 14px;
+    }
+    .source-url {
+        font-size: 12px;
+        color: var(--text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .source-status.enabled {
+        color: #28a745;
+    }
+    .source-status.disabled {
+        color: #dc3545;
+    }
+`;
+document.head.appendChild(style);

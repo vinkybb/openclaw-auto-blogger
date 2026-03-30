@@ -94,15 +94,21 @@
             <section class="articles-section">
                 <div class="articles-header">
                     <h2>📄 生成的文章</h2>
-                    <div class="articles-actions">
-                        <input type="text" class="search-input" id="search-articles" placeholder="搜索文章...">
-                        <button class="btn btn-secondary" id="btn-refresh">
-                            🔄 刷新
-                        </button>
-                        <button class="btn btn-primary" id="btn-publish-selected" disabled>
-                            📤 发布选中
-                        </button>
-                    </div>
+                </div>
+                <div class="articles-actions-bar">
+                    <input type="checkbox" id="selectAllCb" style="width:18px;height:18px;cursor:pointer;">
+                    <label for="selectAllCb" style="font-size:14px;cursor:pointer;user-select:none;">全选</label>
+                    <span id="articles-count" style="font-size:14px;color:var(--text-muted);">(0 篇)</span>
+                    <input type="text" class="search-input" id="search-articles" placeholder="搜索文章...">
+                    <button class="btn btn-secondary" id="btn-refresh">
+                        🔄 刷新
+                    </button>
+                    <button class="btn btn-primary" id="btn-publish-selected" disabled>
+                        📤 发布选中
+                    </button>
+                    <button class="btn btn-danger" id="btn-delete-selected" style="display:none;">
+                        🗑 删除选中
+                    </button>
                 </div>
                 <div class="articles-grid" id="articles-grid">
                     <!-- Dynamically loaded -->

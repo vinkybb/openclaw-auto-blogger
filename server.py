@@ -14,10 +14,11 @@ import re
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory
+from urllib.parse import unquote
 
 # Add module path
 BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_DIR = BASE_DIR / 'output' / 'articles'  # Files saved to articles subdir
+OUTPUT_DIR = BASE_DIR / 'output'  # Files saved to output dir (includes articles subdir)
 sys.path.insert(0, str(BASE_DIR))
 
 from app import BlogPipeline
@@ -148,34 +149,53 @@ def api_status():
 @app.route('/api/articles')
 def api_articles():
     """Get processed articles list"""
-    output_dir = OUTPUT_DIR
     articles = []
     
-    if output_dir.exists():
-        # Use iterdir instead of glob (glob fails on filenames with quotes)
-        for md_file in sorted(output_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            if md_file.suffix != '.md' or not md_file.is_file():
-                continue
-            try:
-                content = md_file.read_text(encoding='utf-8')
-                # Extract title from first line
-                title = content.split('\n')[0].replace('#', '').strip() or md_file.stem
-                # Check published status from content
-                status = 'unpublished'
-                if content.lower().startswith('status: published'):
+    # Search in output dir and all subdirs
+    search_dirs = [OUTPUT_DIR, OUTPUT_DIR / 'articles', OUTPUT_DIR / 'posts', OUTPUT_DIR / 'raw']
+    
+    all_md_files = []
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            for md_file in search_dir.iterdir():
+                if md_file.suffix == '.md' and md_file.is_file():
+                    all_md_files.append(md_file)
+    
+    # Sort by modification time
+    for md_file in sorted(all_md_files, key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            content = md_file.read_text(encoding='utf-8')
+            # Extract title: skip status line if present, find first # line
+            lines = content.split('\n')
+            title = md_file.stem  # default fallback
+            status = 'unpublished'
+            
+            # Check status marker
+            for line in lines[:3]:  # Check first 3 lines
+                if line.lower().startswith('status: published'):
                     status = 'published'
-                # Get file stats
-                stat = md_file.stat()
-                articles.append({
-                    'id': md_file.stem,
-                    'title': title,
-                    'file': md_file.name,
-                    'size': stat.st_size,
-                    'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
-                    'status': status
-                })
-            except Exception as e:
-                logger.error(f"Error reading {md_file}: {e}")
+                elif line.lower().startswith('status: unpublished'):
+                    status = 'unpublished'
+            
+            # Find title (first line starting with #)
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith('#'):
+                    title = stripped.replace('#', '').strip()
+                    break
+            
+            # Get file stats
+            stat = md_file.stat()
+            articles.append({
+                'id': md_file.stem,
+                'title': title,
+                'file': md_file.name,
+                'size': stat.st_size,
+                'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
+                'status': status
+            })
+        except Exception as e:
+            logger.error(f"Error reading {md_file}: {e}")
     
     return jsonify({'articles': articles, 'total': len(articles)})
 
@@ -183,13 +203,18 @@ def api_articles():
 @app.route('/api/articles/<filename>', methods=['DELETE'])
 def api_delete_article(filename):
     """Delete a specific article"""
-    # Search in all output subdirs
-    for subdir in ['articles', 'posts', 'raw']:
-        article_path = BASE_DIR / 'output' / subdir / filename
-        if article_path.exists() and filename.endswith('.md'):
+    # Decode URL-encoded filename
+    filename = unquote(filename)
+    
+    # Search in output dir and all subdirs (same as api_articles)
+    search_dirs = [OUTPUT_DIR, OUTPUT_DIR / 'articles', OUTPUT_DIR / 'posts', OUTPUT_DIR / 'raw']
+    
+    for search_dir in search_dirs:
+        article_path = search_dir / filename
+        if article_path.exists() and article_path.is_file():
             try:
                 article_path.unlink()
-                logger.info(f"Deleted article: {filename} from {subdir}")
+                logger.info(f"Deleted article: {filename} from {search_dir.relative_to(OUTPUT_DIR)}")
                 return jsonify({'success': True, 'message': f'Deleted {filename}'})
             except Exception as e:
                 logger.error(f"Delete failed: {e}")
