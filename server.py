@@ -176,23 +176,49 @@ def api_articles():
 @app.route('/api/articles/<filename>', methods=['DELETE'])
 def api_delete_article(filename):
     """Delete a specific article"""
-    articles_dir = OUTPUT_DIR
-    article_path = articles_dir / filename
+    # Search in all output subdirs
+    for subdir in ['articles', 'posts', 'raw']:
+        article_path = BASE_DIR / 'output' / subdir / filename
+        if article_path.exists() and filename.endswith('.md'):
+            try:
+                article_path.unlink()
+                logger.info(f"Deleted article: {filename} from {subdir}")
+                return jsonify({'success': True, 'message': f'Deleted {filename}'})
+            except Exception as e:
+                logger.error(f"Delete failed: {e}")
+                return jsonify({'error': str(e)}), 500
     
-    if not article_path.exists():
-        return jsonify({'error': 'Article not found'}), 404
+    return jsonify({'error': 'Article not found'}), 404
+
+
+@app.route('/api/articles/<filename>/status', methods=['PATCH'])
+def api_update_status(filename):
+    """Update article status (published/unpublished)"""
+    data = request.get_json() or {}
+    new_status = data.get('status', 'unpublished')
     
-    # Security: only allow .md files
-    if not filename.endswith('.md'):
-        return jsonify({'error': 'Invalid file type'}), 400
+    # Search in all output subdirs
+    for subdir in ['articles', 'posts', 'raw']:
+        article_path = BASE_DIR / 'output' / subdir / filename
+        if article_path.exists() and filename.endswith('.md'):
+            try:
+                content = article_path.read_text(encoding='utf-8')
+                # Toggle status marker at top of file
+                if content.startswith('status: published'):
+                    content = content.replace('status: published', 'status: unpublished', 1)
+                elif content.startswith('status: unpublished'):
+                    content = content.replace('status: unpublished', 'status: published', 1)
+                else:
+                    status_line = f'status: {new_status}\n\n'
+                    content = status_line + content
+                article_path.write_text(content, encoding='utf-8')
+                logger.info(f"Updated status: {filename} -> {new_status}")
+                return jsonify({'success': True, 'status': new_status})
+            except Exception as e:
+                logger.error(f"Status update failed: {e}")
+                return jsonify({'error': str(e)}), 500
     
-    try:
-        article_path.unlink()
-        logger.info(f"Deleted article: {filename}")
-        return jsonify({'success': True, 'message': f'Deleted {filename}'})
-    except Exception as e:
-        logger.error(f"Delete failed: {e}")
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'Article not found'}), 404
 
 
 @app.route('/api/articles/delete-all', methods=['POST'])

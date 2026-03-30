@@ -204,7 +204,19 @@ function renderArticles(articles) {
         return;
     }
     
-    elements.articlesGrid.innerHTML = articles.map(article => `
+    const publishedCount = articles.filter(a => a.status === 'published').length;
+    const unpublishedCount = articles.length - publishedCount;
+    
+    elements.articlesGrid.innerHTML = `
+        <div class="articles-header" style="display:flex;align-items:center;gap:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:8px;margin-bottom:12px;">
+            <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)" style="width:18px;height:18px;">
+            <label for="selectAll" style="font-size:14px;cursor:pointer;">全选 (${articles.length} 篇)</label>
+            <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">
+                已发布: <strong style="color:var(--success-color);">${publishedCount}</strong> | 
+                未发布: <strong style="color:var(--warning-color);">${unpublishedCount}</strong>
+            </span>
+        </div>
+        ${articles.map(article => `
         <div class="article-card" data-id="${article.id}">
             <input type="checkbox" class="article-select" data-id="${article.id}">
             <div class="article-icon">📝</div>
@@ -215,7 +227,13 @@ function renderArticles(articles) {
                     <span>${formatSize(article.size)}</span>
                 </div>
             </div>
-            <div class="article-actions">
+            <span class="article-status ${article.status === 'published' ? 'status-published' : 'status-unpublished'}" style="font-size:12px;padding:2px 8px;border-radius:12px;margin-right:8px;">
+                ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
+            </span>
+            <div class="article-actions" style="display:flex;gap:8px;flex-shrink:0;">
+                <button class="btn-icon" onclick="toggleStatus('${article.id}', '${article.file}', '${article.status}')" title="切换状态">
+                    ${article.status === 'published' ? '📤' : '📥'}
+                </button>
                 <button class="btn-icon" onclick="loadArticleDetail('${article.id}')" title="预览">
                     👁
                 </button>
@@ -227,7 +245,8 @@ function renderArticles(articles) {
                 </button>
             </div>
         </div>
-    `).join('');
+    `).join('')}
+    `;
     
     // Bind selection events
     document.querySelectorAll('.article-select').forEach(cb => {
