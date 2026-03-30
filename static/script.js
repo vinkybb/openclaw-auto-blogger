@@ -162,10 +162,10 @@ function renderArticles(articles) {
                     ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
                 </span>
                 <div class="article-actions" style="display:flex;gap:8px;flex-shrink:0;">
-                    <button class="btn-icon" onclick="toggleStatus('${escapeHtml(article.file)}')" title="切换状态">${article.status === 'published' ? '📤' : '📥'}</button>
+                    <button class="btn-icon" onclick="toggleStatus('${article.file}')" title="切换状态">${article.status === 'published' ? '📤' : '📥'}</button>
                     <button class="btn-icon" onclick="loadArticleDetail('${article.id}')" title="预览">👁</button>
                     <button class="btn-icon" onclick="downloadArticle('${article.id}')" title="下载">⬇</button>
-                    <button class="btn-icon btn-delete" onclick="deleteArticle('${escapeHtml(article.file)}')" title="删除">🗑</button>
+                    <button class="btn-icon btn-delete" onclick="deleteArticle('${article.file}')" title="删除">🗑</button>
                 </div>
             </div>
         `).join('')}
