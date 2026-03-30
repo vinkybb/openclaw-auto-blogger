@@ -222,6 +222,9 @@ function renderArticles(articles) {
                 <button class="btn-icon" onclick="downloadArticle('${article.id}')" title="下载">
                     ⬇
                 </button>
+                <button class="btn-icon btn-delete" onclick="deleteArticle('${article.id}', '${article.filename}')" title="删除">
+                    🗑
+                </button>
             </div>
         </div>
     `).join('');
@@ -325,6 +328,48 @@ function downloadArticle(articleId) {
     link.href = `/output/${articleId}.md`;
     link.download = `${articleId}.md`;
     link.click();
+}
+
+
+// ==================== Delete ====================
+
+function deleteArticle(articleId, filename) {
+    if (!confirm(`确定删除文章 "${articleId}"？`)) return;
+    
+    fetch(`/api/articles/${encodeURIComponent(filename || articleId + '.md')}`, {method: 'DELETE'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showNotification('删除成功', 'success');
+                loadArticles();
+            } else {
+                showNotification('删除失败: ' + data.error, 'error');
+            }
+        })
+        .catch(err => {
+            console.error('Delete failed:', err);
+            showNotification('删除失败', 'error');
+        });
+}
+
+
+function deleteAllArticles() {
+    if (!confirm('确定删除所有文章？此操作不可恢复！')) return;
+    
+    fetch('/api/articles/delete-all', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(`已删除 ${data.deleted} 篇文章`, 'success');
+                loadArticles();
+            } else {
+                showNotification('删除失败', 'error');
+            }
+        })
+        .catch(err => {
+            console.error('Delete all failed:', err);
+            showNotification('删除失败', 'error');
+        });
 }
 
 // ==================== Polling ====================

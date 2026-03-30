@@ -132,6 +132,49 @@ def api_articles():
     
     return jsonify({'articles': articles, 'total': len(articles)})
 
+
+@app.route('/api/articles/<filename>', methods=['DELETE'])
+def api_delete_article(filename):
+    """Delete a specific article"""
+    articles_dir = Path('output')
+    article_path = articles_dir / filename
+    
+    if not article_path.exists():
+        return jsonify({'error': 'Article not found'}), 404
+    
+    # Security: only allow .md files
+    if not filename.endswith('.md'):
+        return jsonify({'error': 'Invalid file type'}), 400
+    
+    try:
+        article_path.unlink()
+        logger.info(f"Deleted article: {filename}")
+        return jsonify({'success': True, 'message': f'Deleted {filename}'})
+    except Exception as e:
+        logger.error(f"Delete failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/articles/delete-all', methods=['POST'])
+def api_delete_all_articles():
+    """Delete all articles"""
+    articles_dir = Path('output')
+    
+    if not articles_dir.exists():
+        return jsonify({'success': True, 'message': 'No articles to delete', 'deleted': 0})
+    
+    deleted_count = 0
+    for f in articles_dir.glob('*.md'):
+        try:
+            f.unlink()
+            deleted_count += 1
+        except Exception as e:
+            logger.error(f"Failed to delete {f}: {e}")
+    
+    logger.info(f"Deleted {deleted_count} articles")
+    return jsonify({'success': True, 'deleted': deleted_count})
+
+
 @app.route('/api/rss-sources')
 def api_rss_sources():
     """Get RSS sources configuration"""
