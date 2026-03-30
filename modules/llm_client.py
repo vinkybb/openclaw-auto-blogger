@@ -82,7 +82,9 @@ class SimpleLLMClient:
         
         headers = {
             'Authorization': f'Bearer {self.api_key}',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-openclaw-agent-id': 'main',
+            'x-openclaw-scopes': 'operator.read,operator.write'  # 尝试传递 scopes
         }
         
         actual_model = model or self.model
