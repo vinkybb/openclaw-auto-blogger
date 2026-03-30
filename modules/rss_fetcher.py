@@ -18,7 +18,7 @@ from typing import List, Dict
 class RSSFetcher:
     """RSS Feed Fetcher 类"""
     
-    def __init__(self, timeout=30, config=None):
+    def __init__(self, config=None, timeout=30):
         self.timeout = timeout
         self.sources = []
         if config:
