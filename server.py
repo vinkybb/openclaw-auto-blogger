@@ -148,7 +148,7 @@ def api_status():
 @app.route('/api/articles')
 def api_articles():
     """Get processed articles list"""
-    output_dir = BASE_DIR / 'output'
+    output_dir = OUTPUT_DIR
     articles = []
     
     if output_dir.exists():
@@ -176,7 +176,7 @@ def api_articles():
 @app.route('/api/articles/<filename>', methods=['DELETE'])
 def api_delete_article(filename):
     """Delete a specific article"""
-    articles_dir = BASE_DIR / 'output'
+    articles_dir = OUTPUT_DIR
     article_path = articles_dir / filename
     
     if not article_path.exists():
@@ -198,7 +198,7 @@ def api_delete_article(filename):
 @app.route('/api/articles/delete-all', methods=['POST'])
 def api_delete_all_articles():
     """Delete all articles"""
-    articles_dir = BASE_DIR / 'output'
+    articles_dir = OUTPUT_DIR
     
     if not articles_dir.exists():
         return jsonify({'success': True, 'message': 'No articles to delete', 'deleted': 0})
@@ -308,7 +308,7 @@ def api_run_pipeline():
                             # Format article: remove YAML frontmatter and dialogue traces
                             md_content = format_article(md_content)
                             filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{title[:30].replace(' ', '_')}.md"
-                            output_path = BASE_DIR / 'output' / filename
+                            output_path = OUTPUT_DIR / filename
                             output_path.write_text(md_content, encoding='utf-8')
                             add_log(f'Saved: {filename}', 'success')
                     
@@ -358,7 +358,7 @@ def api_publish():
         results = []
         for article_id in article_ids:
             # Find the markdown file
-            output_dir = BASE_DIR / 'output'
+            output_dir = OUTPUT_DIR
             md_files = list(output_dir.glob(f'*{article_id}*.md'))
             
             if md_files:
@@ -426,7 +426,7 @@ def api_expand():
                 )
                 
                 filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{title[:30].replace(' ', '_')}.md"
-                output_path = BASE_DIR / 'output' / filename
+                output_path = OUTPUT_DIR / filename
                 output_path.write_text(md_content, encoding='utf-8')
                 
                 add_log(f'Saved expanded article: {filename}', 'success')
@@ -458,7 +458,7 @@ def api_cancel():
 @app.route('/api/article/<article_id>')
 def api_article_detail(article_id):
     """Get article content"""
-    output_dir = BASE_DIR / 'output'
+    output_dir = OUTPUT_DIR
     md_files = list(output_dir.glob(f'*{article_id}*.md'))
     
     if md_files:
@@ -484,7 +484,7 @@ def api_health():
 
 if __name__ == '__main__':
     # Ensure output directory exists
-    (BASE_DIR / 'output').mkdir(exist_ok=True)
+    (OUTPUT_DIR).mkdir(exist_ok=True)
     
     # Start server
     port = int(os.environ.get('PORT', 5000))
