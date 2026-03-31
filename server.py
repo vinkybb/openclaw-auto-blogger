@@ -365,7 +365,12 @@ def api_run_pipeline():
                         if md_content:
                             # Format article: remove YAML frontmatter and dialogue traces
                             md_content = format_article(md_content)
-                            filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{title[:30].replace(' ', '_')}.md"
+                            # Clean title for filename: remove special chars
+                            safe_title = "".join(c if c.isalnum() or c in (' ', '-', '_') else '' for c in title)
+                            safe_title = safe_title.strip().replace(' ', '_')[:30]
+                            filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.md"
+                            if not safe_title:
+                                filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_untitled.md"
                             output_path = OUTPUT_DIR / filename
                             output_path.write_text(md_content, encoding='utf-8')
                             add_log(f'Saved: {filename}', 'success')

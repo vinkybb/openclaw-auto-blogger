@@ -278,7 +278,7 @@ function renderArticles(articles) {
                 <input type="checkbox" class="article-select" data-id="${article.id}" style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
                 <span style="font-size:24px;flex-shrink:0;">📝</span>
                 <div class="article-info" style="flex:1;min-width:0;overflow:hidden;">
-                    <div class="article-title" style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(article.title)}</div>
+                    <div class="article-title" style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(article.title)}">${escapeHtml(article.title)}</div>
                     <div style="font-size:12px;color:var(--text-muted);">
                         <span>${article.modified}</span> · <span>${formatSize(article.size)}</span>
                     </div>
