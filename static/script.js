@@ -503,6 +503,11 @@ style.textContent = `
         border-radius: 8px;
         transition: box-shadow 0.2s;
     }
+    .article-info {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+    }
     .article-title {
         font-size: 14px;
         font-weight: 500;
@@ -511,6 +516,7 @@ style.textContent = `
         text-overflow: ellipsis;
         white-space: nowrap;
         display: block;
+        max-width: 100%;
     }
     .article-card:hover {
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
