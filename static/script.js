@@ -271,30 +271,27 @@ function renderArticles(articles) {
         elements.articlesCount.textContent = `(${articles.length} 篇) | 已发布 ${published} | 未发布 ${unpublished}`;
     }
     
-    elements.articlesGrid.innerHTML = `
-        <div class="articles-list">
-        ${articles.map(article => `
-            <div class="article-card" data-id="${article.id}" data-file="${encodeURIComponent(article.file)}" data-title="${escapeHtml(article.title).toLowerCase()}">
-                <input type="checkbox" class="article-select" data-id="${article.id}" style="width:18px;height:18px;cursor:pointer;flex-shrink:0;">
-                <span style="font-size:24px;flex-shrink:0;">📝</span>
-                <div class="article-info" style="flex:1;min-width:0;overflow:hidden;">
-                    <div class="article-title" style="font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(article.title)}">${escapeHtml(article.title)}</div>
-                    <div style="font-size:12px;color:var(--text-muted);">
-                        <span>${article.modified}</span> · <span>${formatSize(article.size)}</span>
-                    </div>
-                </div>
-                <span class="status-badge ${article.status === 'published' ? 'published' : 'unpublished'}" style="font-size:12px;padding:4px 10px;border-radius:12px;flex-shrink:0;">
-                    ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
-                </span>
-                <div class="article-actions" style="display:flex;gap:8px;flex-shrink:0;">
-                    <button class="btn-icon" onclick="previewArticle('${article.id}')" title="预览">👁</button>
-                    <button class="btn-icon" onclick="downloadArticle('${article.id}')" title="下载">⬇</button>
-                    <button class="btn-icon btn-delete" onclick="deleteArticle('${encodeURIComponent(article.file)}')" title="删除">🗑</button>
+    elements.articlesGrid.innerHTML = articles.map(article => `
+        <div class="article-card" data-id="${article.id}" data-file="${encodeURIComponent(article.file)}" data-title="${escapeHtml(article.title).toLowerCase()}">
+            <input type="checkbox" class="article-select" data-id="${article.id}">
+            <span class="article-icon">📝</span>
+            <div class="article-info">
+                <div class="article-title" title="${escapeHtml(article.title)}">${escapeHtml(article.title)}</div>
+                <div class="article-meta">
+                    <span>${article.modified}</span>
+                    <span>${formatSize(article.size)}</span>
                 </div>
             </div>
-        `).join('')}
+            <span class="article-status status-${article.status === 'published' ? 'published' : 'unpublished'}">
+                ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
+            </span>
+            <div class="article-actions">
+                <button class="btn-icon" onclick="previewArticle('${article.id}')" title="预览">👁</button>
+                <button class="btn-icon" onclick="downloadArticle('${article.id}')" title="下载">⬇</button>
+                <button class="btn-icon btn-delete" onclick="deleteArticle('${encodeURIComponent(article.file)}')" title="删除">🗑</button>
+            </div>
         </div>
-    `;
+    `).join('');
     
     document.querySelectorAll('.article-select').forEach(cb => {
         cb.addEventListener('change', updateSelection);
