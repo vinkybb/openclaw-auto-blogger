@@ -498,11 +498,18 @@ style.textContent = `
         align-items: center;
         gap: 12px;
         padding: 12px 16px;
-        background: var(--bg-primary);
+        background: var(--bg-secondary);
         border: 1px solid var(--border-color);
         border-radius: 8px;
-        margin-bottom: 8px;
         transition: box-shadow 0.2s;
+    }
+    .article-title {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .article-card:hover {
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
