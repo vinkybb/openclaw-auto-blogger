@@ -279,11 +279,11 @@ function renderArticles(articles) {
         return;
     }
     
-    const published = articles.filter(a => a.status === 'published').length;
-    const unpublished = articles.length - published;
+    const modified = articles.filter(a => a.status === 'modified').length;
+    const unmodified = articles.length - modified;
     
     if (elements.articlesCount) {
-        elements.articlesCount.textContent = `(${articles.length} 篇) | 已修改 ${published} | 未修改 ${unpublished}`;
+        elements.articlesCount.textContent = `(${articles.length} 篇) | 已修改 ${modified} | 未修改 ${unmodified}`;
     }
     
     elements.articlesGrid.innerHTML = articles.map(article => `
@@ -297,8 +297,8 @@ function renderArticles(articles) {
                     <span>${formatSize(article.size)}</span>
                 </div>
             </div>
-            <span class="article-status status-${article.status === 'published' ? 'published' : 'unpublished'}">
-                ${article.status === 'published' ? '✓ 已修改' : '○ 未修改'}
+            <span class="article-status status-${article.status === 'modified' ? 'modified' : 'unmodified'}">
+                ${article.status === 'modified' ? '✓ 已修改' : '○ 未修改'}
             </span>
             <div class="article-actions">
                 <button class="btn-icon" onclick="previewArticle('${article.id}')" title="预览">👁</button>

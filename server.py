@@ -8,6 +8,7 @@ import sys
 import logging
 import threading
 import re
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory
@@ -111,13 +112,23 @@ def api_articles():
             content = md_file.read_text(encoding='utf-8')
             lines = content.split('\n')
             title = md_file.stem
-            status = 'unpublished'
+            status = 'unmodified'  # 默认状态
             
-            for line in lines[:3]:
-                if line.lower().startswith('status: published'):
-                    status = 'published'
-                elif line.lower().startswith('status: unpublished'):
-                    status = 'unpublished'
+            # 解析 front matter 中的状态
+            first_line = lines[0].strip() if lines else ''
+            if first_line in ('---', '--'):
+                delimiter = first_line
+                for line in lines[1:]:
+                    if line.strip() == delimiter:
+                        break
+                    stripped = line.strip().lower()
+                    if stripped.startswith('status:'):
+                        status_value = line.split(':', 1)[1].strip().lower()
+                        # 支持多种状态值
+                        if status_value in ('modified', 'published'):
+                            status = 'modified'
+                        elif status_value in ('unmodified', 'unpublished'):
+                            status = 'unmodified'
             
             for line in lines:
                 stripped = line.strip()
@@ -140,9 +151,27 @@ def api_articles():
     return jsonify({'articles': articles, 'total': len(articles)})
 
 
+def compute_content_hash(content: str) -> str:
+    """计算文章内容的 hash（不含 front matter）"""
+    lines = content.split('\n')
+    
+    # 跳过 front matter
+    first_line = lines[0].strip() if lines else ''
+    if first_line in ('---', '--'):
+        delimiter = first_line
+        for i, line in enumerate(lines[1:], 1):
+            if line.strip() == delimiter:
+                # 只计算正文部分的 hash
+                body_content = '\n'.join(lines[i+1:])
+                return hashlib.md5(body_content.encode('utf-8')).hexdigest()[:8]
+    
+    # 没有 front matter，计算全部内容
+    return hashlib.md5(content.encode('utf-8')).hexdigest()[:8]
+
+
 @app.route('/api/articles/<filename>', methods=['PUT'])
 def api_update_article(filename):
-    """Update article content - preserve front matter"""
+    """Update article content - preserve front matter and track modifications via hash"""
     filename = unquote(filename)
     data = request.get_json() or {}
     
@@ -164,6 +193,7 @@ def api_update_article(filename):
                 has_front_matter = first_line in ('---', '--')
                 
                 front_matter = []
+                front_matter_lines = []
                 body_start = 0
                 
                 if has_front_matter:
@@ -171,9 +201,13 @@ def api_update_article(filename):
                     delimiter = first_line
                     for i, line in enumerate(original_lines[1:], 1):
                         if line.strip() == delimiter:
-                            front_matter = original_lines[:i+1]
+                            front_matter_lines = original_lines[:i+1]
                             body_start = i + 1
                             break
+                    
+                    # 解析 front matter 中的字段
+                    for line in front_matter_lines:
+                        front_matter.append(line)
                 
                 # 更新标题（如果提供）
                 if title:
@@ -182,15 +216,74 @@ def api_update_article(filename):
                         new_lines[0] = f"# {title}"
                         new_content = '\n'.join(new_lines)
                 
-                # 合并：保留 front matter + 新内容
-                if front_matter:
-                    final_content = '\n'.join(front_matter) + '\n' + new_content
-                else:
-                    final_content = new_content
+                # 计算新内容的 hash
+                new_hash = compute_content_hash(new_content)
                 
+                # 获取原始 hash（从 front matter 中）
+                original_hash = None
+                for line in front_matter_lines[1:-1] if has_front_matter else []:
+                    if line.strip().startswith('original_hash:'):
+                        original_hash = line.split(':', 1)[1].strip()
+                        break
+                
+                # 判断是否被修改：如果 hash 不同，标记为 modified
+                is_modified = original_hash and original_hash != new_hash
+                
+                # 构建 front matter
+                if has_front_matter and front_matter_lines:
+                    # 更新或添加 hash 和 status
+                    new_front_matter = []
+                    hash_updated = False
+                    status_updated = False
+                    
+                    for line in front_matter_lines:
+                        stripped = line.strip()
+                        if stripped.startswith('original_hash:'):
+                            new_front_matter.append(f"original_hash: {original_hash}")
+                            hash_updated = True
+                        elif stripped.startswith('current_hash:'):
+                            new_front_matter.append(f"current_hash: {new_hash}")
+                        elif stripped.startswith('status:'):
+                            # 如果内容被修改，更新状态
+                            if is_modified:
+                                new_front_matter.append(f"status: modified")
+                            else:
+                                new_front_matter.append(line)
+                            status_updated = True
+                        elif stripped == delimiter:
+                            # 在结束 delimiter 前添加缺失的字段
+                            if not hash_updated and original_hash:
+                                new_front_matter.append(f"original_hash: {original_hash}")
+                            if 'current_hash:' not in '\n'.join(new_front_matter):
+                                new_front_matter.append(f"current_hash: {new_hash}")
+                            if not status_updated:
+                                new_front_matter.append(f"status: {'modified' if is_modified else 'unmodified'}")
+                            new_front_matter.append(line)
+                        else:
+                            new_front_matter.append(line)
+                    
+                    front_matter = new_front_matter
+                else:
+                    # 创建新的 front matter
+                    front_matter = [
+                        '---',
+                        f'original_hash: {new_hash}',
+                        f'current_hash: {new_hash}',
+                        f'status: unmodified',
+                        '---'
+                    ]
+                
+                # 合并：front matter + 新内容
+                final_content = '\n'.join(front_matter) + '\n' + new_content
                 article_path.write_text(final_content, encoding='utf-8')
-                logger.info(f"Updated article: {filename} (preserved front matter)")
-                return jsonify({'status': 'success', 'message': 'Article saved'})
+                
+                logger.info(f"Updated article: {filename} (hash: {new_hash}, modified: {is_modified})")
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Article saved',
+                    'modified': is_modified,
+                    'hash': new_hash
+                })
             except Exception as e:
                 logger.error(f"Update failed: {e}")
                 return jsonify({'status': 'error', 'message': str(e)}), 500

@@ -537,12 +537,12 @@ body {
     margin-right: 8px;
 }
 
-.status-published {
+.status-modified {
     background: var(--success-bg, #e6f4ea);
     color: var(--success-text, #1e7e34);
 }
 
-.status-unpublished {
+.status-unmodified {
     background: var(--warning-bg, #fff3cd);
     color: var(--warning-text, #856404);
 }
