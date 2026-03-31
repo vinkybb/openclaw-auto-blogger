@@ -1,69 +1,31 @@
 #!/usr/bin/env python3
 """
 Blog Pipeline Web Dashboard Server
-Flask server providing API and web interface for blog pipeline control
 """
 
 import os
 import sys
-import json
 import logging
 import threading
-import time
 import re
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from urllib.parse import unquote
 
-# Add module path
 BASE_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = BASE_DIR / 'output'
 sys.path.insert(0, str(BASE_DIR))
 
 from app import BlogPipeline
 
-def format_article(content):
-    """Remove YAML frontmatter, dialogue traces, and ensure clean title."""
-    content = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, flags=re.DOTALL)
-    
-    dialogue_patterns = [
-        r'^我来.*?\n',
-        r'^根据摘要.*?\n',
-        r'^这篇文章约.*?\n',
-        r'^让我先获取原文.*?\n',
-        r'^首先.*?\n',
-        r'^好的.*?\n',
-        r'^下面是.*?\n',
-    ]
-    for pattern in dialogue_patterns:
-        content = re.sub(pattern, '', content, flags=re.MULTILINE)
-    
-    content = content.strip()
-    
-    lines = content.split('\n')
-    while lines and not lines[0].strip().startswith('#'):
-        lines = lines[1:]
-    
-    if lines and lines[0].strip().startswith('#'):
-        title = lines[0].strip()
-        title = re.sub(r'[#"\']+', '', title).strip()
-        lines[0] = f"# {title}"
-    
-    content = '\n'.join(lines)
-    return content
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
 pipeline_state = {
     'status': 'idle',
-    'current_task': None,
     'progress': 0,
     'articles_processed': 0,
     'total_articles': 0,
@@ -116,7 +78,6 @@ def api_status():
     with state_lock:
         return jsonify({
             'status': pipeline_state['status'],
-            'current_task': pipeline_state['current_task'],
             'progress': pipeline_state['progress'],
             'articles_processed': pipeline_state['articles_processed'],
             'total_articles': pipeline_state['total_articles'],
@@ -172,7 +133,7 @@ def api_articles():
 
 @app.route('/api/articles/<filename>', methods=['PUT'])
 def api_update_article(filename):
-    """Update article content"""
+    """Update article content - allow empty content"""
     filename = unquote(filename)
     data = request.get_json() or {}
     
@@ -185,9 +146,7 @@ def api_update_article(filename):
                 content = data.get('content', '')
                 title = data.get('title', '')
                 
-                if not content:
-                    return jsonify({'status': 'error', 'message': 'Missing content'}), 400
-                
+                # Allow empty content - just save whatever is provided
                 if title:
                     lines = content.split('\n')
                     if lines and lines[0].strip().startswith('#'):
@@ -221,52 +180,6 @@ def api_delete_article(filename):
                 return jsonify({'error': str(e)}), 500
     
     return jsonify({'error': 'Article not found'}), 404
-
-
-@app.route('/api/articles/<filename>/status', methods=['PATCH'])
-def api_update_status(filename):
-    data = request.get_json() or {}
-    new_status = data.get('status', 'unpublished')
-    
-    for subdir in ['articles', 'posts', 'raw']:
-        article_path = BASE_DIR / 'output' / subdir / filename
-        if article_path.exists() and filename.endswith('.md'):
-            try:
-                content = article_path.read_text(encoding='utf-8')
-                if content.startswith('status: published'):
-                    content = content.replace('status: published', 'status: unpublished', 1)
-                elif content.startswith('status: unpublished'):
-                    content = content.replace('status: unpublished', 'status: published', 1)
-                else:
-                    status_line = f'status: {new_status}\n\n'
-                    content = status_line + content
-                article_path.write_text(content, encoding='utf-8')
-                logger.info(f"Updated status: {filename} -> {new_status}")
-                return jsonify({'success': True, 'status': new_status})
-            except Exception as e:
-                logger.error(f"Status update failed: {e}")
-                return jsonify({'error': str(e)}), 500
-    
-    return jsonify({'error': 'Article not found'}), 404
-
-
-@app.route('/api/articles/delete-all', methods=['POST'])
-def api_delete_all_articles():
-    articles_dir = OUTPUT_DIR
-    
-    if not articles_dir.exists():
-        return jsonify({'success': True, 'message': 'No articles to delete', 'deleted': 0})
-    
-    deleted_count = 0
-    for f in articles_dir.glob('*.md'):
-        try:
-            f.unlink()
-            deleted_count += 1
-        except Exception as e:
-            logger.error(f"Failed to delete {f}: {e}")
-    
-    logger.info(f"Deleted {deleted_count} articles")
-    return jsonify({'success': True, 'deleted': deleted_count})
 
 
 @app.route('/api/rss-sources')
@@ -352,7 +265,6 @@ def api_run_pipeline():
                     if result.get('article', {}).get('success'):
                         md_content = result.get('markdown', '')
                         if md_content:
-                            md_content = format_article(md_content)
                             safe_title = "".join(c if c.isalnum() or c in (' ', '-', '_') else '' for c in title)
                             safe_title = safe_title.strip().replace(' ', '_')[:30]
                             filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_title}.md"
@@ -387,102 +299,6 @@ def api_run_pipeline():
     thread.start()
     
     return jsonify({'status': 'started', 'message': 'Pipeline started in background'})
-
-@app.route('/api/publish', methods=['POST'])
-def api_publish():
-    data = request.json or {}
-    article_ids = data.get('articles', [])
-    
-    if not article_ids:
-        return jsonify({'error': 'No articles selected'}), 400
-    
-    add_log(f'Publishing {len(article_ids)} articles...', 'info')
-    
-    try:
-        p = get_pipeline()
-        if not p:
-            raise Exception('Pipeline not initialized')
-        
-        results = []
-        for article_id in article_ids:
-            md_files = list(OUTPUT_DIR.glob(f'*{article_id}*.md'))
-            
-            if md_files:
-                md_file = md_files[0]
-                content = md_file.read_text(encoding='utf-8')
-                publish_result = p.publisher.publish(content, md_file.stem)
-                results.append({
-                    'id': article_id,
-                    'success': publish_result.get('success', False),
-                    'message': publish_result.get('message', '')
-                })
-                add_log(f'Published: {md_file.name}', 'success')
-            else:
-                results.append({
-                    'id': article_id,
-                    'success': False,
-                    'message': 'File not found'
-                })
-        
-        return jsonify({'results': results})
-        
-    except Exception as e:
-        add_log(f'Publish error: {str(e)}', 'error')
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/expand', methods=['POST'])
-def api_expand():
-    data = request.json or {}
-    title = data.get('title', '')
-    content = data.get('content', '')
-    
-    if not title:
-        return jsonify({'error': 'Title required'}), 400
-    
-    add_log(f'Expanding: {title[:50]}...', 'info')
-    
-    try:
-        p = get_pipeline()
-        if not p:
-            raise Exception('Pipeline not initialized')
-        
-        summary_result = p.summarizer.summarize(title, content)
-        
-        if summary_result.get('success'):
-            expand_result = p.expander.expand(
-                title=title,
-                summary=summary_result.get('summary', ''),
-                source_url=data.get('url', ''),
-                style='深度分析',
-                word_count=2000
-            )
-            
-            if expand_result.get('success'):
-                md_content = p._format_markdown(
-                    title=expand_result.get('title', title),
-                    content=expand_result.get('content', ''),
-                    tags=expand_result.get('tags', []),
-                    source_url=data.get('url', '')
-                )
-                
-                filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{title[:30].replace(' ', '_')}.md"
-                output_path = OUTPUT_DIR / filename
-                output_path.write_text(md_content, encoding='utf-8')
-                
-                add_log(f'Saved expanded article: {filename}', 'success')
-                
-                return jsonify({
-                    'success': True,
-                    'title': expand_result.get('title'),
-                    'content': expand_result.get('content'),
-                    'file': filename
-                })
-        
-        return jsonify({'error': 'Expansion failed'}), 500
-        
-    except Exception as e:
-        add_log(f'Expand error: {str(e)}', 'error')
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/cancel', methods=['POST'])
 def api_cancel():

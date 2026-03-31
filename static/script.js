@@ -506,10 +506,11 @@ style.textContent = `
     .article-title {
         font-size: 14px;
         font-weight: 500;
-        color: var(--text-primary);
+        color: #e6edf3;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        display: block;
     }
     .article-card:hover {
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
