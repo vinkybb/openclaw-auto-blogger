@@ -22,12 +22,21 @@ schedule:
   interval_hours: 6
   start_time: 08:00
 sources:
+# ============ 测试可用的RSS源 (baoyu-reader) ============
+- count: 15
+  enabled: true
+  name: TechCrunch
+  tags:
+  - tech
+  - tech-news
+  type: rss
+  url: https://techcrunch.com/feed/
 - count: 10
   enabled: true
-  name: LessWrong AI安全
+  name: LessWrong
   tags:
-  - ai-safety
-  - alignment
+  - ai
+  - rationality
   type: rss
   url: https://www.lesswrong.com/feed.xml
 - count: 10
@@ -39,86 +48,6 @@ sources:
   type: rss
   url: https://www.alignmentforum.org/feed.xml
 - count: 5
-  enabled: false
-  name: AI Weekly Newsletter
-  tags:
-  - ai
-  - newsletter
-  type: rss
-  url: https://aiweekly.substack.com/feed
-- count: 10
-  enabled: true
-  name: OpenAI Blog
-  tags:
-  - ai
-  - openai
-  type: rss
-  url: https://openai.com/blog/rss.xml
-- count: 10
-  enabled: false
-  name: Google AI Blog
-  tags:
-  - ai
-  - google
-  type: rss
-  url: https://blog.google/technology/ai/rss/
-- count: 10
-  enabled: false
-  name: MIT Tech Review AI
-  tags:
-  - ai
-  - tech-review
-  type: rss
-  url: https://www.technologyreview.com/feed/
-- count: 10
-  enabled: false
-  name: DeepMind Blog
-  tags:
-  - ai
-  - deepmind
-  type: rss
-  url: https://deepmind.google/feed/
-- count: 15
-  enabled: false
-  name: 机器之心
-  tags:
-  - ai
-  - zh-CN
-  type: rss
-  url: https://www.jiqizhixin.com/rss
-- count: 15
-  enabled: true
-  name: 新智元
-  tags:
-  - ai
-  - zh-CN
-  type: rss
-  url: https://www.jiqizhixin.com/rss
-- count: 15
-  enabled: false
-  name: HackerNews AI
-  tags:
-  - ai
-  - hackernews
-  type: rss
-  url: https://hnrss.org/frontpage?q=ai+OR+llm+OR+gpt+OR+machine+learning
-- command: hackernews/top
-  count: 10
-  enabled: true
-  name: HackerNews 热门
-  tags:
-  - tech
-  - hackernews
-  type: bb-browser
-- command: v2ex/hot
-  count: 10
-  enabled: true
-  name: V2EX AI话题
-  tags:
-  - tech
-  - zh-CN
-  type: bb-browser
-- count: 5
   enabled: true
   name: 阮一峰博客
   tags:
@@ -127,86 +56,37 @@ sources:
   type: rss
   url: https://www.ruanyifeng.com/blog/atom.xml
 - count: 10
-  enabled: false
-  name: Hugging Face Blog
+  enabled: true
+  name: AWS ML Blog
   tags:
   - ai
-  - open-source
+  - aws
+  - machine-learning
   type: rss
-  url: https://huggingface.co/blog/feed.xml
-- count: 10
-  enabled: false
-  name: Anthropic Blog
-  tags:
-  - ai
-  - claude
-  - alignment
-  type: rss
-  url: https://anthropic.com/news/rss
+  url: https://aws.amazon.com/blogs/machine-learning/feed/
 - count: 15
-  enabled: false
-  name: 量子位
+  enabled: true
+  name: HackerNews AI
   tags:
   - ai
-  - zh-CN
+  - hackernews
   type: rss
-  url: https://www.qbitai.com/rss
-- count: 10
-  enabled: false
-  name: TechCrunch AI
+  url: https://hnrss.org/frontpage?q=ai+OR+llm+OR+gpt+OR+machine+learning
+- count: 15
+  enabled: true
+  name: HackerNews Best
   tags:
-  - ai
-  - tech-news
+  - tech
+  - hackernews
+  - best
   type: rss
-  url: https://techcrunch.com/category/artificial-intelligence/feed/
+  url: https://hnrss.org/best
 - count: 10
-  enabled: false
-  name: Meta AI Blog
+  enabled: true
+  name: Azure Blog
   tags:
-  - ai
-  - meta
-  - llama
+  - cloud
+  - azure
+  - microsoft
   type: rss
-  url: https://ai.meta.com/blog/rss/
-- count: 10
-  enabled: false
-  name: Stability AI Blog
-  tags:
-  - ai
-  - stable-diffusion
-  - generative
-  type: rss
-  url: https://stability.ai/news/rss
-- count: 10
-  enabled: false
-  name: The Gradient
-  tags:
-  - ai
-  - research
-  type: rss
-  url: https://thegradient.pub/rss.xml
-- count: 10
-  enabled: false
-  name: BBC News
-  type: rss
-  url: https://feeds.bbci.co.uk/news/rss.xml
-- command: 36kr/newsflash
-  count: 10
-  enabled: false
-  name: 36氪快讯
-  type: bb-browser
-- command: weibo/hot
-  count: 10
-  enabled: false
-  name: 微博热搜
-  type: bb-browser
-- command: bilibili/popular
-  count: 10
-  enabled: false
-  name: B站热门
-  type: bb-browser
-- command: xueqiu/hot-stock
-  count: 5
-  enabled: false
-  name: 雪球热门股票
-  type: bb-browser
+  url: https://azure.microsoft.com/en-us/blog/feed/

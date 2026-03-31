@@ -11,15 +11,31 @@
 
 rss:
   sources:
-    - name: "奇客Solidot"
-      url: "https://www.solidot.org/index.rss"
+    # ============ 测试可用的RSS源 (baoyu-reader) ============
+    - name: "TechCrunch"
+      url: "https://techcrunch.com/feed/"
       enabled: true
-    - name: "36氪"
-      url: "https://36kr.com/feed"
+    - name: "LessWrong"
+      url: "https://www.lesswrong.com/feed.xml"
       enabled: true
-    - name: "少数派"
-      url: "https://sspai.com/feed"
-      enabled: false
+    - name: "Alignment Forum"
+      url: "https://www.alignmentforum.org/feed.xml"
+      enabled: true
+    - name: "阮一峰博客"
+      url: "https://www.ruanyifeng.com/blog/atom.xml"
+      enabled: true
+    - name: "AWS ML Blog"
+      url: "https://aws.amazon.com/blogs/machine-learning/feed/"
+      enabled: true
+    - name: "HackerNews AI"
+      url: "https://hnrss.org/frontpage?q=ai+OR+llm+OR+gpt+OR+machine+learning"
+      enabled: true
+    - name: "HackerNews Best"
+      url: "https://hnrss.org/best"
+      enabled: true
+    - name: "Azure Blog"
+      url: "https://azure.microsoft.com/en-us/blog/feed/"
+      enabled: true
 
 openclaw:
   gateway_url: "http://127.0.0.1:18789"
