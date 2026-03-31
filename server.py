@@ -244,11 +244,8 @@ def api_update_article(filename):
                         elif stripped.startswith('current_hash:'):
                             new_front_matter.append(f"current_hash: {new_hash}")
                         elif stripped.startswith('status:'):
-                            # 如果内容被修改，更新状态
-                            if is_modified:
-                                new_front_matter.append(f"status: modified")
-                            else:
-                                new_front_matter.append(line)
+                            # 根据内容是否变化更新状态
+                            new_front_matter.append(f"status: {'modified' if is_modified else 'unmodified'}")
                             status_updated = True
                         elif stripped == delimiter:
                             # 在结束 delimiter 前添加缺失的字段
