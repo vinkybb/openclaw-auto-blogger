@@ -274,7 +274,7 @@ function renderArticles(articles) {
         `;
         // 清空统计信息
         if (elements.articlesCount) {
-            elements.articlesCount.textContent = '(0 篇) | 已发布 0 | 未发布 0';
+            elements.articlesCount.textContent = '(0 篇) | 已修改 0 | 未修改 0';
         }
         return;
     }
@@ -283,7 +283,7 @@ function renderArticles(articles) {
     const unpublished = articles.length - published;
     
     if (elements.articlesCount) {
-        elements.articlesCount.textContent = `(${articles.length} 篇) | 已发布 ${published} | 未发布 ${unpublished}`;
+        elements.articlesCount.textContent = `(${articles.length} 篇) | 已修改 ${published} | 未修改 ${unpublished}`;
     }
     
     elements.articlesGrid.innerHTML = articles.map(article => `
@@ -298,7 +298,7 @@ function renderArticles(articles) {
                 </div>
             </div>
             <span class="article-status status-${article.status === 'published' ? 'published' : 'unpublished'}">
-                ${article.status === 'published' ? '✓ 已发布' : '○ 未发布'}
+                ${article.status === 'published' ? '✓ 已修改' : '○ 未修改'}
             </span>
             <div class="article-actions">
                 <button class="btn-icon" onclick="previewArticle('${article.id}')" title="预览">👁</button>
@@ -425,7 +425,7 @@ async function publishSelected() {
         
         if (data.results) {
             const success = data.results.filter(r => r.success).length;
-            showToast(`已发布 ${success}/${ids.length} 篇文章`, success > 0 ? 'success' : 'error');
+            showToast(`已修改 ${success}/${ids.length} 篇文章`, success > 0 ? 'success' : 'error');
             loadArticles();
         }
     } catch (e) {
