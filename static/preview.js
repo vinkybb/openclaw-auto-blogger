@@ -288,16 +288,23 @@ function saveArticle() {
 function publishAndReturn() {
     saveArticle();
     
-    fetch(API_BASE + '/api/articles/' + encodeURIComponent(currentFile) + '/publish', {
+    // currentFile 是完整文件名（如 xxx.md），需要去掉 .md 后缀作为 article_id
+    var articleId = currentFile ? currentFile.replace(/\.md$/, '') : '';
+    if (!articleId) {
+        showToast('文章ID无效', 'error');
+        return;
+    }
+    
+    fetch(API_BASE + '/api/articles/' + encodeURIComponent(articleId) + '/publish', {
         method: 'POST'
     })
     .then(function(r) { return r.json(); })
     .then(function(result) {
-        if (result.status === 'success') {
+        if (result.success) {
             showToast('发布成功', 'success');
             setTimeout(function() { window.location.href = '/'; }, 1000);
         } else {
-            showToast(result.message || '发布失败', 'error');
+            showToast(result.error || result.message || '发布失败', 'error');
         }
     })
     .catch(function(err) { showToast('发布失败: ' + err.message, 'error'); });

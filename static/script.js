@@ -123,10 +123,20 @@ function updateStatusBar(status) {
         <span class="status-text">${s.text}</span>
     `;
     
-    // Progress bar
+    // Progress bar for pipeline
     if (elements.progressDiv) {
         const progress = status.progress || 0;
-        if (status.status === 'running') {
+        const publishStatus = status.publish_status || {};
+        
+        // 显示发布进度或流水线进度
+        if (publishStatus.active) {
+            elements.progressDiv.style.display = 'block';
+            const pubProgress = publishStatus.total > 0 ? Math.round((publishStatus.processed / publishStatus.total) * 100) : 0;
+            if (elements.progressFill) elements.progressFill.style.width = `${pubProgress}%`;
+            if (elements.progressPercent) elements.progressPercent.textContent = `${pubProgress}%`;
+            if (elements.articlesProcessed) elements.articlesProcessed.textContent = publishStatus.processed || 0;
+            if (elements.totalArticles) elements.totalArticles.textContent = publishStatus.total || 0;
+        } else if (status.status === 'running') {
             elements.progressDiv.style.display = 'block';
             if (elements.progressFill) elements.progressFill.style.width = `${progress}%`;
             if (elements.progressPercent) elements.progressPercent.textContent = `${progress}%`;
@@ -399,6 +409,12 @@ async function publishSelected() {
     
     const ids = Array.from(checked).map(cb => cb.dataset.id);
     
+    // 禁用按钮，显示进度
+    if (elements.publishSelectedBtn) {
+        elements.publishSelectedBtn.disabled = true;
+        elements.publishSelectedBtn.textContent = `📤 发布中...`;
+    }
+    
     try {
         const res = await fetch('/api/publish', {
             method: 'POST',
@@ -414,6 +430,12 @@ async function publishSelected() {
         }
     } catch (e) {
         showToast('发布失败: ' + e, 'error');
+    } finally {
+        // 恢复按钮状态
+        if (elements.publishSelectedBtn) {
+            elements.publishSelectedBtn.disabled = false;
+            updateSelection();
+        }
     }
 }
 

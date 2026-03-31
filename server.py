@@ -32,7 +32,14 @@ pipeline_state = {
     'total_articles': 0,
     'last_run': None,
     'error': None,
-    'log_messages': []
+    'log_messages': [],
+    'publish_status': {
+        'active': False,
+        'total': 0,
+        'processed': 0,
+        'current_article': '',
+        'results': []
+    }
 }
 
 state_lock = threading.Lock()
@@ -83,7 +90,8 @@ def api_status():
             'articles_processed': pipeline_state['articles_processed'],
             'total_articles': pipeline_state['total_articles'],
             'last_run': pipeline_state['last_run'],
-            'error': pipeline_state['error']
+            'error': pipeline_state['error'],
+            'publish_status': pipeline_state['publish_status']
         })
 
 @app.route('/api/articles')
@@ -252,14 +260,16 @@ def update_article_status(filepath: Path, status: str):
         content = filepath.read_text(encoding='utf-8')
         lines = content.split('\n')
         
-        # 检查是否有 front matter
-        has_front_matter = lines[0].strip() == '---' if lines else False
+        # 检查是否有 front matter（支持 --- 或 -- 开头）
+        first_line = lines[0].strip() if lines else ''
+        has_front_matter = first_line in ('---', '--')
         
         if has_front_matter:
             # 在 front matter 中添加/更新 status
             front_matter_end = None
+            delimiter = first_line
             for i, line in enumerate(lines[1:], 1):
-                if line.strip() == '---':
+                if line.strip() == delimiter:
                     front_matter_end = i
                     break
             
@@ -277,10 +287,16 @@ def update_article_status(filepath: Path, status: str):
                     lines.insert(front_matter_end, f"status: {status}")
                 
                 filepath.write_text('\n'.join(lines), encoding='utf-8')
+            else:
+                # front matter 不完整，添加完整的
+                new_content = f"---\nstatus: {status}\n---\n{content}"
+                filepath.write_text(new_content, encoding='utf-8')
         else:
-            # 添加简单的状态标记在文件开头
-            new_content = f"status: {status}\n\n{content}"
+            # 添加完整的 front matter
+            new_content = f"---\nstatus: {status}\n---\n{content}"
             filepath.write_text(new_content, encoding='utf-8')
+        
+        logger.info(f"Updated article status: {filepath.name} -> {status}")
     except Exception as e:
         logger.error(f"Update status failed: {e}")
 
@@ -425,7 +441,7 @@ def api_article_detail(article_id):
 @app.route('/api/publish', methods=['POST'])
 def api_publish_articles():
     """
-    发布选中的文章到 GitHub（支持覆盖发布）
+    发布选中的文章到 GitHub（支持覆盖发布，带进度跟踪）
     请求体: {"articles": ["article_id1", "article_id2", ...]}
     """
     data = request.get_json() or {}
@@ -434,10 +450,25 @@ def api_publish_articles():
     if not article_ids:
         return jsonify({'error': 'No articles selected'}), 400
     
+    # 初始化发布状态
+    with state_lock:
+        pipeline_state['publish_status'] = {
+            'active': True,
+            'total': len(article_ids),
+            'processed': 0,
+            'current_article': '',
+            'results': []
+        }
+    
     results = []
     search_dirs = [OUTPUT_DIR, OUTPUT_DIR / 'articles', OUTPUT_DIR / 'posts', OUTPUT_DIR / 'raw']
     
-    for article_id in article_ids:
+    for idx, article_id in enumerate(article_ids):
+        # 更新进度
+        with state_lock:
+            pipeline_state['publish_status']['processed'] = idx
+            pipeline_state['publish_status']['current_article'] = article_id
+        
         # 查找文章文件
         article_path = None
         for search_dir in search_dirs:
@@ -513,6 +544,16 @@ def api_publish_articles():
             add_log(f'Publish error: {str(e)}', 'error')
     
     success_count = sum(1 for r in results if r.get('success'))
+    
+    # 完成发布，更新状态
+    with state_lock:
+        pipeline_state['publish_status'] = {
+            'active': False,
+            'total': len(article_ids),
+            'processed': len(article_ids),
+            'current_article': '',
+            'results': results
+        }
     
     return jsonify({
         'results': results,
