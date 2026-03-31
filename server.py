@@ -142,7 +142,7 @@ def api_articles():
 
 @app.route('/api/articles/<filename>', methods=['PUT'])
 def api_update_article(filename):
-    """Update article content - allow empty content"""
+    """Update article content - preserve front matter"""
     filename = unquote(filename)
     data = request.get_json() or {}
     
@@ -152,18 +152,44 @@ def api_update_article(filename):
         article_path = search_dir / filename
         if article_path.exists() and article_path.is_file():
             try:
-                content = data.get('content', '')
+                new_content = data.get('content', '')
                 title = data.get('title', '')
                 
-                # Allow empty content - just save whatever is provided
-                if title:
-                    lines = content.split('\n')
-                    if lines and lines[0].strip().startswith('#'):
-                        lines[0] = f"# {title}"
-                        content = '\n'.join(lines)
+                # 读取原有文件，保留 front matter
+                original_content = article_path.read_text(encoding='utf-8')
+                original_lines = original_content.split('\n')
                 
-                article_path.write_text(content, encoding='utf-8')
-                logger.info(f"Updated article: {filename}")
+                # 检查是否有 front matter
+                first_line = original_lines[0].strip() if original_lines else ''
+                has_front_matter = first_line in ('---', '--')
+                
+                front_matter = []
+                body_start = 0
+                
+                if has_front_matter:
+                    # 提取原有 front matter
+                    delimiter = first_line
+                    for i, line in enumerate(original_lines[1:], 1):
+                        if line.strip() == delimiter:
+                            front_matter = original_lines[:i+1]
+                            body_start = i + 1
+                            break
+                
+                # 更新标题（如果提供）
+                if title:
+                    new_lines = new_content.split('\n')
+                    if new_lines and new_lines[0].strip().startswith('#'):
+                        new_lines[0] = f"# {title}"
+                        new_content = '\n'.join(new_lines)
+                
+                # 合并：保留 front matter + 新内容
+                if front_matter:
+                    final_content = '\n'.join(front_matter) + '\n' + new_content
+                else:
+                    final_content = new_content
+                
+                article_path.write_text(final_content, encoding='utf-8')
+                logger.info(f"Updated article: {filename} (preserved front matter)")
                 return jsonify({'status': 'success', 'message': 'Article saved'})
             except Exception as e:
                 logger.error(f"Update failed: {e}")
