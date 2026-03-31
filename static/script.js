@@ -300,6 +300,9 @@ function renderArticles(articles) {
     if (elements.selectAllCb) {
         elements.selectAllCb.checked = false;
     }
+    
+    // 重置选择状态，确保按钮状态正确
+    updateSelection();
 }
 
 function filterArticles() {
