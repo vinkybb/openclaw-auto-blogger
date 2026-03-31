@@ -512,14 +512,16 @@ body {
 }
 
 .article-title {
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 14px !important;
+    font-weight: 500 !important;
     margin-bottom: 4px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--text-primary);
-    display: block;
+    color: #e6edf3 !important;
+    display: block !important;
+    max-width: 100%;
+    line-height: 1.4;
 }
 
 .article-meta {
