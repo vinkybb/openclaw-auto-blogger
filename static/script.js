@@ -262,6 +262,10 @@ function renderArticles(articles) {
                 <div style="font-size:14px;margin-top:8px;">点击"运行流水线"开始处理 RSS</div>
             </div>
         `;
+        // 清空统计信息
+        if (elements.articlesCount) {
+            elements.articlesCount.textContent = '(0 篇) | 已发布 0 | 未发布 0';
+        }
         return;
     }
     
@@ -379,7 +383,14 @@ async function deleteSelected() {
         showToast(`${failCount} 篇文章删除失败`, 'error');
     }
     
-    loadArticles();
+    // 重新加载文章列表并重置选择状态
+    await loadArticles();
+    // 确保全选复选框被重置
+    if (elements.selectAllCb) {
+        elements.selectAllCb.checked = false;
+        elements.selectAllCb.indeterminate = false;
+    }
+    updateSelection();
 }
 
 async function publishSelected() {
