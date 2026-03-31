@@ -22,7 +22,7 @@ schedule:
   interval_hours: 6
   start_time: 08:00
 sources:
-# ============ AI 安全/对齐研究 ============
+# ============ AI 安全/对齐研究 (核心推荐) ============
 - count: 10
   enabled: true
   name: LessWrong
@@ -48,7 +48,25 @@ sources:
   - hackernews
   type: rss
   url: https://hnrss.org/frontpage?q=ai+safety
-# ============ AI 研究/技术 ============
+- count: 10
+  enabled: true
+  name: HackerNews Alignment
+  tags:
+  - alignment
+  - hackernews
+  type: rss
+  url: https://hnrss.org/newest?q=alignment
+- count: 10
+  enabled: true
+  name: Reddit r/AlignmentResearch
+  tags:
+  - ai-safety
+  - alignment
+  - reddit
+  type: rss
+  url: https://www.reddit.com/r/AlignmentResearch/.rss
+
+# ============ AI 公司官方博客 ============
 - count: 10
   enabled: true
   name: OpenAI Blog
@@ -66,6 +84,72 @@ sources:
   - machine-learning
   type: rss
   url: https://aws.amazon.com/blogs/machine-learning/feed/
+- count: 10
+  enabled: true
+  name: Google AI Blog
+  tags:
+  - ai
+  - google
+  type: rss
+  url: https://feeds.feedburner.com/GoogleAiBlog
+- count: 10
+  enabled: true
+  name: Microsoft Research
+  tags:
+  - ai
+  - microsoft
+  - research
+  type: rss
+  url: https://www.microsoft.com/en-us/research/blog/feed/
+- count: 10
+  enabled: true
+  name: Cohere Blog
+  tags:
+  - ai
+  - cohere
+  - llm
+  type: rss
+  url: https://cohere.com/blog/rss.xml
+
+# ============ 学术论文源 ============
+- count: 20
+  enabled: true
+  name: arXiv cs.AI
+  tags:
+  - arxiv
+  - ai
+  - research
+  type: rss
+  url: https://export.arxiv.org/api/query?search_query=cat:cs.AI&start=0&max_results=20
+- count: 20
+  enabled: true
+  name: arXiv cs.LG (ML)
+  tags:
+  - arxiv
+  - machine-learning
+  - research
+  type: rss
+  url: https://export.arxiv.org/api/query?search_query=cat:cs.LG&start=0&max_results=20
+- count: 10
+  enabled: true
+  name: arXiv AI Safety
+  tags:
+  - arxiv
+  - ai-safety
+  - research
+  type: rss
+  url: https://export.arxiv.org/api/query?search_query=all:ai+safety&start=0&max_results=10
+- count: 10
+  enabled: true
+  name: arXiv Alignment
+  tags:
+  - arxiv
+  - alignment
+  - research
+  type: rss
+  url: https://export.arxiv.org/api/query?search_query=all:alignment&start=0&max_results=10
+
+# ============ HackerNews 关键词订阅 ============
 - count: 15
   enabled: true
   name: HackerNews AI
@@ -76,9 +160,131 @@ sources:
   url: https://hnrss.org/frontpage?q=artificial+intelligence
 - count: 10
   enabled: true
-  name: Google AI Blog
+  name: HackerNews ML
+  tags:
+  - machine-learning
+  - hackernews
+  type: rss
+  url: https://hnrss.org/newest?q=machine+learning
+- count: 10
+  enabled: true
+  name: HackerNews LLM
+  tags:
+  - llm
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=llm
+- count: 10
+  enabled: true
+  name: HackerNews GPT
+  tags:
+  - gpt
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=gpt
+- count: 10
+  enabled: true
+  name: HackerNews DeepMind
+  tags:
+  - deepmind
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=deepmind
+- count: 10
+  enabled: true
+  name: HackerNews Claude
+  tags:
+  - claude
+  - anthropic
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=claude
+- count: 10
+  enabled: true
+  name: HackerNews Anthropic
+  tags:
+  - anthropic
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=anthropic
+- count: 10
+  enabled: true
+  name: HackerNews OpenAI
+  tags:
+  - openai
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=openai
+- count: 10
+  enabled: true
+  name: HackerNews AGI
+  tags:
+  - agi
+  - hackernews
+  type: rss
+  url: https://hnrss.org/frontpage?q=agi
+
+# ============ Reddit 社区 ============
+- count: 15
+  enabled: true
+  name: Reddit r/artificial
   tags:
   - ai
-  - google
+  - reddit
   type: rss
-  url: https://blog.google/technology/ai/rss.xml
+  url: https://www.reddit.com/r/artificial/.rss
+- count: 15
+  enabled: true
+  name: Reddit r/MachineLearning
+  tags:
+  - machine-learning
+  - reddit
+  type: rss
+  url: https://www.reddit.com/r/MachineLearning/.rss
+- count: 15
+  enabled: true
+  name: Reddit r/LocalLLaMA
+  tags:
+  - llm
+  - llama
+  - reddit
+  type: rss
+  url: https://www.reddit.com/r/LocalLLaMA/.rss
+- count: 10
+  enabled: true
+  name: Reddit r/ChatGPT
+  tags:
+  - chatgpt
+  - gpt
+  - reddit
+  type: rss
+  url: https://www.reddit.com/r/ChatGPT/.rss
+- count: 10
+  enabled: true
+  name: Reddit r/ClaudeAI
+  tags:
+  - claude
+  - anthropic
+  - reddit
+  type: rss
+  url: https://www.reddit.com/r/ClaudeAI/.rss
+
+# ============ 研究者个人博客 ============
+- count: 10
+  enabled: true
+  name: Karpathy Blog
+  tags:
+  - ai
+  - deep-learning
+  - blog
+  type: rss
+  url: https://karpathy.github.io/feed.xml
+- count: 10
+  enabled: true
+  name: Lilian Weng Blog
+  tags:
+  - ai
+  - machine-learning
+  - blog
+  type: rss
+  url: https://lilianweng.github.io/feed.xml
