@@ -21,6 +21,20 @@ schedule:
   enabled: false
   interval_hours: 6
   start_time: 08:00
+publish:
+  local:
+    enabled: true
+    content_dir: "./output/posts"
+
+  github:
+    enabled: true
+    use_ssh: true
+    repo: "vinkybb/vinkybb-blog"
+    branch: "main"
+    posts_dir: "posts"
+    commit_message: "Auto publish: {title}"
+    auto_publish: true
+
 sources:
 # ============ AI 安全/对齐研究 (核心推荐) ============
 - count: 10

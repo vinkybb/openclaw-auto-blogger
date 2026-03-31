@@ -54,12 +54,31 @@ publish:
     enabled: true
     content_dir: "./output/posts"
 
+  # GitHub Pages 发布 - 支持两种方式：
+  # 方式一：SSH + Deploy Key（推荐，无需 token）
+  #   1. 在 GitHub 仓库 Settings → Deploy keys → Add deploy key
+  #   2. 勾选 "Allow write accesses"
+  #   3. 服务器上配置对应的 SSH 密钥
+  # 方式二：API Token（传统方式）
+  #   1. GitHub Settings → Developer settings → Personal access tokens
+  #   2. 勾选 repo 权限
   github:
     enabled: false
-    repo: "your-username/your-blog"
-    branch: "main"
-    token: null
+    
+    # === SSH/Deploy Key 方式（推荐）===
+    use_ssh: true                    # 启用 SSH 方式
+    repo: "your-username/your-blog"  # 仓库地址（格式：用户名/仓库名）
+    branch: "main"                   # 分支名称
+    posts_dir: "posts"               # 文章存放目录
     commit_message: "Auto publish: {title}"
+    # ssh_key_path: "/path/to/deploy_key"  # 可选：指定 SSH 密钥路径
+    
+    # === 自动发布 ===
+    auto_publish: true               # 流水线运行时自动发布到 GitHub
+    
+    # === API Token 方式（备选）===
+    # use_ssh: false
+    # token: "ghp_xxxx"              # 或设置环境变量 GITHUB_TOKEN
 
   # WordPress REST API：使用「应用密码」基本认证
   # url 可为站点根 https://your-blog.com、或 .../wp-json、或旧版 xmlrpc.php（将自动换为 REST）

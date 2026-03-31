@@ -18,6 +18,7 @@ OUTPUT_DIR = BASE_DIR / 'output'
 sys.path.insert(0, str(BASE_DIR))
 
 from app import BlogPipeline
+from modules.publisher import Publisher
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -211,6 +212,78 @@ def api_logs():
     with state_lock:
         return jsonify({'logs': pipeline_state['log_messages'][-50:]})
 
+def get_publisher():
+    """获取 Publisher 实例"""
+    import yaml
+    config_path = Path('config.yaml')
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f) or {}
+        return Publisher(config.get('publish', {}))
+    return Publisher({})
+
+def publish_article_to_github(filepath: Path, title: str, content: str, tags: list = None) -> dict:
+    """
+    发布单篇文章到 GitHub
+    返回发布结果
+    """
+    try:
+        publisher = get_publisher()
+        github_config = publisher.config.get('github', {})
+        
+        if not github_config.get('enabled', False):
+            return {'success': False, 'error': 'GitHub 发布未启用'}
+        
+        # 调用 GitHub 发布方法
+        result = publisher._publish_github(title, content, tags or [])
+        
+        if result.get('success'):
+            # 更新文章状态为已发布
+            update_article_status(filepath, 'published')
+        
+        return result
+    except Exception as e:
+        logger.error(f"Publish to GitHub failed: {e}")
+        return {'success': False, 'error': str(e)}
+
+def update_article_status(filepath: Path, status: str):
+    """更新文章的发布状态"""
+    try:
+        content = filepath.read_text(encoding='utf-8')
+        lines = content.split('\n')
+        
+        # 检查是否有 front matter
+        has_front_matter = lines[0].strip() == '---' if lines else False
+        
+        if has_front_matter:
+            # 在 front matter 中添加/更新 status
+            front_matter_end = None
+            for i, line in enumerate(lines[1:], 1):
+                if line.strip() == '---':
+                    front_matter_end = i
+                    break
+            
+            if front_matter_end:
+                # 检查是否已有 status 行
+                status_line_idx = None
+                for i in range(1, front_matter_end):
+                    if lines[i].lower().startswith('status:'):
+                        status_line_idx = i
+                        break
+                
+                if status_line_idx:
+                    lines[status_line_idx] = f"status: {status}"
+                else:
+                    lines.insert(front_matter_end, f"status: {status}")
+                
+                filepath.write_text('\n'.join(lines), encoding='utf-8')
+        else:
+            # 添加简单的状态标记在文件开头
+            new_content = f"status: {status}\n\n{content}"
+            filepath.write_text(new_content, encoding='utf-8')
+    except Exception as e:
+        logger.error(f"Update status failed: {e}")
+
 @app.route('/api/pipeline', methods=['POST'])
 def api_run_pipeline():
     global pipeline_state
@@ -234,6 +307,18 @@ def api_run_pipeline():
             if not p:
                 raise Exception('Pipeline not initialized')
             
+            # 检查是否启用 GitHub 自动发布
+            import yaml
+            config_path = Path('config.yaml')
+            auto_publish = False
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f) or {}
+                auto_publish = config.get('publish', {}).get('github', {}).get('auto_publish', False)
+            
+            if auto_publish:
+                add_log('GitHub auto-publish enabled', 'info')
+            
             add_log('Fetching RSS articles...', 'info')
             articles = p.fetch_articles()
             
@@ -250,6 +335,7 @@ def api_run_pipeline():
             add_log(f'Found {len(articles)} articles to process', 'info')
             
             processed = 0
+            published_count = 0
             for article in articles:
                 with state_lock:
                     if pipeline_state['status'] == 'cancelled':
@@ -273,6 +359,17 @@ def api_run_pipeline():
                             output_path = OUTPUT_DIR / filename
                             output_path.write_text(md_content, encoding='utf-8')
                             add_log(f'Saved: {filename}', 'success')
+                            
+                            # 自动发布到 GitHub
+                            if auto_publish:
+                                add_log(f'Publishing to GitHub: {title[:30]}...', 'info')
+                                tags = result.get('article', {}).get('tags', [])
+                                pub_result = publish_article_to_github(output_path, title, md_content, tags)
+                                if pub_result.get('success'):
+                                    published_count += 1
+                                    add_log(f'Published to GitHub: {pub_result.get("url", "")}', 'success')
+                                else:
+                                    add_log(f'GitHub publish failed: {pub_result.get("error", "unknown")}', 'warning')
                     
                     processed += 1
                     with state_lock:
@@ -282,7 +379,7 @@ def api_run_pipeline():
                 except Exception as e:
                     add_log(f'Error processing article: {str(e)[:50]}', 'error')
             
-            add_log('Pipeline completed!', 'success')
+            add_log(f'Pipeline completed! Processed {processed}, Published {published_count} to GitHub', 'success')
             with state_lock:
                 pipeline_state['status'] = 'idle'
                 pipeline_state['progress'] = 100
@@ -324,6 +421,191 @@ def api_article_detail(article_id):
         })
     
     return jsonify({'error': 'Article not found'}), 404
+
+@app.route('/api/publish', methods=['POST'])
+def api_publish_articles():
+    """
+    发布选中的文章到 GitHub（支持覆盖发布）
+    请求体: {"articles": ["article_id1", "article_id2", ...]}
+    """
+    data = request.get_json() or {}
+    article_ids = data.get('articles', [])
+    
+    if not article_ids:
+        return jsonify({'error': 'No articles selected'}), 400
+    
+    results = []
+    search_dirs = [OUTPUT_DIR, OUTPUT_DIR / 'articles', OUTPUT_DIR / 'posts', OUTPUT_DIR / 'raw']
+    
+    for article_id in article_ids:
+        # 查找文章文件
+        article_path = None
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                for md_file in search_dir.iterdir():
+                    if md_file.suffix == '.md' and md_file.is_file():
+                        if md_file.stem == article_id or article_id in md_file.stem:
+                            article_path = md_file
+                            break
+                if article_path:
+                    break
+        
+        if not article_path:
+            results.append({
+                'id': article_id,
+                'success': False,
+                'error': 'Article not found'
+            })
+            continue
+        
+        try:
+            content = article_path.read_text(encoding='utf-8')
+            lines = content.split('\n')
+            
+            # 提取标题
+            title = article_path.stem
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith('#'):
+                    title = stripped.replace('#', '').strip()
+                    break
+            
+            # 提取标签（从 front matter 或内容中）
+            tags = []
+            in_front_matter = False
+            for line in lines:
+                if line.strip() == '---':
+                    in_front_matter = not in_front_matter
+                    continue
+                if in_front_matter and line.strip().startswith('tags:'):
+                    tag_line = line.split(':', 1)[1].strip()
+                    if tag_line.startswith('['):
+                        # YAML list format
+                        tag_line = tag_line.replace('[', '').replace(']', '')
+                        tags = [t.strip() for t in tag_line.split(',') if t.strip()]
+                    else:
+                        tags = [tag_line]
+            
+            # 发布到 GitHub（覆盖发布）
+            add_log(f'Publishing (override): {title[:30]}...', 'info')
+            pub_result = publish_article_to_github(article_path, title, content, tags)
+            
+            results.append({
+                'id': article_id,
+                'title': title,
+                'success': pub_result.get('success', False),
+                'url': pub_result.get('url', ''),
+                'error': pub_result.get('error', ''),
+                'override': True  # 标记为覆盖发布
+            })
+            
+            if pub_result.get('success'):
+                add_log(f'Published (override): {pub_result.get("url", "")}', 'success')
+            else:
+                add_log(f'Publish failed: {pub_result.get("error", "")}', 'error')
+                
+        except Exception as e:
+            results.append({
+                'id': article_id,
+                'success': False,
+                'error': str(e)
+            })
+            add_log(f'Publish error: {str(e)}', 'error')
+    
+    success_count = sum(1 for r in results if r.get('success'))
+    
+    return jsonify({
+        'results': results,
+        'total': len(results),
+        'success_count': success_count,
+        'message': f'Published {success_count}/{len(results)} articles'
+    })
+
+
+@app.route('/api/articles/<article_id>/publish', methods=['POST'])
+def api_publish_single_article(article_id):
+    """
+    发布单篇文章到 GitHub（支持覆盖发布）
+    用于预览页面的发布按钮
+    """
+    search_dirs = [OUTPUT_DIR, OUTPUT_DIR / 'articles', OUTPUT_DIR / 'posts', OUTPUT_DIR / 'raw']
+    
+    article_path = None
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            for md_file in search_dir.iterdir():
+                if md_file.suffix == '.md' and md_file.is_file():
+                    if md_file.stem == article_id or article_id in md_file.stem:
+                        article_path = md_file
+                        break
+            if article_path:
+                break
+    
+    if not article_path:
+        return jsonify({'success': False, 'error': 'Article not found'}), 404
+    
+    try:
+        content = article_path.read_text(encoding='utf-8')
+        lines = content.split('\n')
+        
+        # 提取标题
+        title = article_path.stem
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                title = stripped.replace('#', '').strip()
+                break
+        
+        # 提取标签
+        tags = []
+        in_front_matter = False
+        for line in lines:
+            if line.strip() == '---':
+                in_front_matter = not in_front_matter
+                continue
+            if in_front_matter and line.strip().startswith('tags:'):
+                tag_line = line.split(':', 1)[1].strip()
+                if tag_line.startswith('['):
+                    tag_line = tag_line.replace('[', '').replace(']', '')
+                    tags = [t.strip() for t in tag_line.split(',') if t.strip()]
+                else:
+                    tags = [tag_line]
+        
+        # 发布到 GitHub
+        add_log(f'Publishing single article: {title[:30]}...', 'info')
+        pub_result = publish_article_to_github(article_path, title, content, tags)
+        
+        if pub_result.get('success'):
+            return jsonify({
+                'success': True,
+                'url': pub_result.get('url', ''),
+                'message': 'Article published successfully',
+                'override': True
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': pub_result.get('error', 'Unknown error')
+            })
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/articles/<article_id>/download')
+def api_download_article(article_id):
+    """下载文章文件"""
+    search_dirs = [OUTPUT_DIR, OUTPUT_DIR / 'articles', OUTPUT_DIR / 'posts', OUTPUT_DIR / 'raw']
+    
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            for md_file in search_dir.iterdir():
+                if md_file.suffix == '.md' and md_file.is_file():
+                    if md_file.stem == article_id or article_id in md_file.stem:
+                        return send_from_directory(str(search_dir), md_file.name, as_attachment=True)
+    
+    return jsonify({'error': 'Article not found'}), 404
+
 
 @app.route('/api/health')
 def api_health():
