@@ -66,7 +66,8 @@ async function loadLogs() {
         const data = await res.json();
         const logs = data.logs || [];
         
-        if (logs.length > lastLogCount) {
+        // 日志数量变化时刷新（增加或减少都刷新，减少表示流水线重新启动）
+        if (logs.length !== lastLogCount) {
             renderLogs(logs);
             lastLogCount = logs.length;
         }

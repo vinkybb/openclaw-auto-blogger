@@ -151,21 +151,13 @@ class BlogPipeline:
     
     def _format_markdown(self, title: str, content: str, tags: List[str], 
                          source_url: str = None) -> str:
-        """格式化为 Markdown 文件"""
-        front_matter = {
-            'title': title,
-            'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'tags': tags,
-            'draft': False
-        }
+        """格式化为 Markdown 文件（不包含 YAML frontmatter）"""
+        # 直接以标题开始，不生成 YAML frontmatter
+        markdown = f"# {title}\n\n{content}\n"
         
-        if source_url and self.config.get('content', {}).get('include_source', True):
-            front_matter['source'] = source_url
-        
-        # YAML front matter
-        yaml_fm = yaml.dump(front_matter, allow_unicode=True, default_flow_style=False)
-        
-        markdown = f"---\n{yaml_fm}---\n\n{content}\n"
+        # 添加标签
+        if tags:
+            markdown += f"\n\n**标签**: {', '.join(tags)}\n"
         
         # 添加来源链接
         if source_url and self.config.get('content', {}).get('include_source', True):
