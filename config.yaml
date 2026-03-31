@@ -22,21 +22,14 @@ schedule:
   interval_hours: 6
   start_time: 08:00
 sources:
-# ============ 测试可用的RSS源 (baoyu-reader) ============
-- count: 15
-  enabled: true
-  name: TechCrunch
-  tags:
-  - tech
-  - tech-news
-  type: rss
-  url: https://techcrunch.com/feed/
+# ============ AI 安全/对齐研究 ============
 - count: 10
   enabled: true
   name: LessWrong
   tags:
-  - ai
+  - ai-safety
   - rationality
+  - alignment
   type: rss
   url: https://www.lesswrong.com/feed.xml
 - count: 10
@@ -47,14 +40,23 @@ sources:
   - alignment
   type: rss
   url: https://www.alignmentforum.org/feed.xml
-- count: 5
+- count: 10
   enabled: true
-  name: 阮一峰博客
+  name: HackerNews AI Safety
   tags:
-  - tech
-  - zh-CN
+  - ai-safety
+  - hackernews
   type: rss
-  url: https://www.ruanyifeng.com/blog/atom.xml
+  url: https://hnrss.org/frontpage?q=ai+safety
+# ============ AI 研究/技术 ============
+- count: 10
+  enabled: true
+  name: OpenAI Blog
+  tags:
+  - ai
+  - openai
+  type: rss
+  url: https://openai.com/blog/rss.xml
 - count: 10
   enabled: true
   name: AWS ML Blog
@@ -71,22 +73,12 @@ sources:
   - ai
   - hackernews
   type: rss
-  url: https://hnrss.org/frontpage?q=ai+OR+llm+OR+gpt+OR+machine+learning
-- count: 15
-  enabled: true
-  name: HackerNews Best
-  tags:
-  - tech
-  - hackernews
-  - best
-  type: rss
-  url: https://hnrss.org/best
+  url: https://hnrss.org/frontpage?q=artificial+intelligence
 - count: 10
   enabled: true
-  name: Azure Blog
+  name: Google AI Blog
   tags:
-  - cloud
-  - azure
-  - microsoft
+  - ai
+  - google
   type: rss
-  url: https://azure.microsoft.com/en-us/blog/feed/
+  url: https://blog.google/technology/ai/rss.xml

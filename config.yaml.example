@@ -11,30 +11,28 @@
 
 rss:
   sources:
-    # ============ 测试可用的RSS源 (baoyu-reader) ============
-    - name: "TechCrunch"
-      url: "https://techcrunch.com/feed/"
-      enabled: true
+    # ============ AI 安全/对齐研究 ============
     - name: "LessWrong"
       url: "https://www.lesswrong.com/feed.xml"
       enabled: true
     - name: "Alignment Forum"
       url: "https://www.alignmentforum.org/feed.xml"
       enabled: true
-    - name: "阮一峰博客"
-      url: "https://www.ruanyifeng.com/blog/atom.xml"
+    - name: "HackerNews AI Safety"
+      url: "https://hnrss.org/frontpage?q=ai+safety"
+      enabled: true
+    # ============ AI 研究/技术 ============
+    - name: "OpenAI Blog"
+      url: "https://openai.com/blog/rss.xml"
       enabled: true
     - name: "AWS ML Blog"
       url: "https://aws.amazon.com/blogs/machine-learning/feed/"
       enabled: true
     - name: "HackerNews AI"
-      url: "https://hnrss.org/frontpage?q=ai+OR+llm+OR+gpt+OR+machine+learning"
+      url: "https://hnrss.org/frontpage?q=artificial+intelligence"
       enabled: true
-    - name: "HackerNews Best"
-      url: "https://hnrss.org/best"
-      enabled: true
-    - name: "Azure Blog"
-      url: "https://azure.microsoft.com/en-us/blog/feed/"
+    - name: "Google AI Blog"
+      url: "https://blog.google/technology/ai/rss.xml"
       enabled: true
 
 openclaw:
