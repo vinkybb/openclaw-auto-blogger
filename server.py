@@ -200,6 +200,41 @@ def api_articles():
     return jsonify({'articles': articles, 'total': len(articles)})
 
 
+@app.route('/api/articles/<filename>', methods=['PUT'])
+def api_update_article(filename):
+    """Update article content"""
+    filename = unquote(filename)
+    data = request.get_json() or {}
+    
+    # Search in output dir and all subdirs
+    search_dirs = [OUTPUT_DIR, OUTPUT_DIR / 'articles', OUTPUT_DIR / 'posts', OUTPUT_DIR / 'raw']
+    
+    for search_dir in search_dirs:
+        article_path = search_dir / filename
+        if article_path.exists() and article_path.is_file():
+            try:
+                content = data.get('content', '')
+                title = data.get('title', '')
+                
+                if title and content:
+                    # Update title in content if first line is # heading
+                    lines = content.split('\n')
+                    if lines and lines[0].strip().startswith('#'):
+                        lines[0] = f"# {title}"
+                        content = '\n'.join(lines)
+                    
+                    article_path.write_text(content, encoding='utf-8')
+                    logger.info(f"Updated article: {filename}")
+                    return jsonify({'status': 'success', 'message': 'Article saved'})
+                
+                return jsonify({'status': 'error', 'message': 'Missing content or title'}), 400
+            except Exception as e:
+                logger.error(f"Update failed: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 500
+    
+    return jsonify({'status': 'error', 'message': 'Article not found'}), 404
+
+
 @app.route('/api/articles/<filename>', methods=['DELETE'])
 def api_delete_article(filename):
     """Delete a specific article"""
