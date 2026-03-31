@@ -219,7 +219,7 @@ class Publisher:
                         capture_output=True,
                         text=True,
                         env=git_env,
-                        timeout=60
+                        timeout=180
                     )
                     if check and result.returncode != 0:
                         raise Exception(f"Git 命令失败: {result.stderr}")
@@ -232,7 +232,7 @@ class Publisher:
                     capture_output=True,
                     text=True,
                     env=git_env,
-                    timeout=120
+                    timeout=300
                 )
                 if clone_result.returncode != 0:
                     # 如果分支不存在，尝试克隆默认分支
@@ -241,7 +241,7 @@ class Publisher:
                         capture_output=True,
                         text=True,
                         env=git_env,
-                        timeout=120
+                        timeout=300
                     )
                     if clone_result.returncode != 0:
                         return {'success': False, 'error': f"克隆仓库失败: {clone_result.stderr}"}

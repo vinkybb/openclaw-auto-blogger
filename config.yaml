@@ -29,6 +29,7 @@ publish:
   github:
     enabled: true
     use_ssh: true
+    ssh_key_path: "/root/.ssh/id_rsa_blog"
     repo: "vinkybb/vinkybb-blog"
     branch: "main"
     posts_dir: "posts"
