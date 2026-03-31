@@ -286,7 +286,8 @@ function saveArticle() {
 
 // 发布并返回
 function publishAndReturn() {
-    saveArticle();
+    var title = document.getElementById('articleTitle').value;
+    var content = document.getElementById('editor').value;
     
     // currentFile 是完整文件名（如 xxx.md），需要去掉 .md 后缀作为 article_id
     var articleId = currentFile ? currentFile.replace(/\.md$/, '') : '';
@@ -295,11 +296,27 @@ function publishAndReturn() {
         return;
     }
     
-    fetch(API_BASE + '/api/articles/' + encodeURIComponent(articleId) + '/publish', {
-        method: 'POST'
+    // 先保存，再发布
+    fetch(API_BASE + '/api/articles/' + encodeURIComponent(currentFile), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title, content: content })
     })
     .then(function(r) { return r.json(); })
+    .then(function(saveResult) {
+        if (saveResult.status !== 'success') {
+            showToast('保存失败: ' + (saveResult.message || '未知错误'), 'error');
+            return;
+        }
+        
+        // 保存成功后发布
+        return fetch(API_BASE + '/api/articles/' + encodeURIComponent(articleId) + '/publish', {
+            method: 'POST'
+        });
+    })
+    .then(function(r) { return r ? r.json() : null; })
     .then(function(result) {
+        if (!result) return; // 保存失败时提前返回
         if (result.success) {
             showToast('发布成功', 'success');
             setTimeout(function() { window.location.href = '/'; }, 1000);
@@ -307,7 +324,7 @@ function publishAndReturn() {
             showToast(result.error || result.message || '发布失败', 'error');
         }
     })
-    .catch(function(err) { showToast('发布失败: ' + err.message, 'error'); });
+    .catch(function(err) { showToast('操作失败: ' + err.message, 'error'); });
 }
 
 // Toast 通知
