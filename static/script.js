@@ -164,6 +164,12 @@ async function runPipeline() {
         const data = await res.json();
         
         if (res.ok) {
+            // 重置日志计数器，确保新日志能正确加载
+            lastLogCount = 0;
+            // 清空当前日志显示
+            if (elements.logPanel) {
+                elements.logPanel.innerHTML = '';
+            }
             showToast('流水线已启动', 'success');
         } else {
             showToast('启动失败: ' + (data.error || '未知错误'), 'error');
