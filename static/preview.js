@@ -285,7 +285,7 @@ function saveArticle() {
 }
 
 // 发布并返回
-function publishAndReturn() {
+async function publishAndReturn() {
     var title = document.getElementById('articleTitle').value;
     var content = document.getElementById('editor').value;
     
@@ -296,35 +296,39 @@ function publishAndReturn() {
         return;
     }
     
-    // 先保存，再发布
-    fetch(API_BASE + '/api/articles/' + encodeURIComponent(currentFile), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title, content: content })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(saveResult) {
+    try {
+        showToast('正在保存...', 'info');
+        
+        // 先保存
+        var saveResp = await fetch(API_BASE + '/api/articles/' + encodeURIComponent(currentFile), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title, content: content })
+        });
+        var saveResult = await saveResp.json();
+        
         if (saveResult.status !== 'success') {
             showToast('保存失败: ' + (saveResult.message || '未知错误'), 'error');
             return;
         }
         
-        // 保存成功后发布
-        return fetch(API_BASE + '/api/articles/' + encodeURIComponent(articleId) + '/publish', {
+        showToast('正在发布...', 'info');
+        
+        // 再发布
+        var pubResp = await fetch(API_BASE + '/api/articles/' + encodeURIComponent(articleId) + '/publish', {
             method: 'POST'
         });
-    })
-    .then(function(r) { return r ? r.json() : null; })
-    .then(function(result) {
-        if (!result) return; // 保存失败时提前返回
+        var result = await pubResp.json();
+        
         if (result.success) {
-            showToast('发布成功', 'success');
+            showToast('发布成功！', 'success');
             setTimeout(function() { window.location.href = '/'; }, 1000);
         } else {
             showToast(result.error || result.message || '发布失败', 'error');
         }
-    })
-    .catch(function(err) { showToast('操作失败: ' + err.message, 'error'); });
+    } catch (err) {
+        showToast('操作失败: ' + err.message, 'error');
+    }
 }
 
 // Toast 通知
